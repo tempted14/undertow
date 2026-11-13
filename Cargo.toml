@@ -1,0 +1,59 @@
+[package]
+name = "undertow"
+version = "0.1.1"
+edition = "2024"
+description = "A native, memory-conscious TIDAL music player for Windows"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+ab_glyph = "0.2"
+aes = "0.8"
+base64 = "0.22"
+cbc = "0.1"
+ctr = "0.9"
+directories = "6"
+eframe = { version = "0.33", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+egui_software_backend = { path = "vendor/egui_software_backend", features = ["winit", "rayon"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+rand = "0.8"
+quick-xml = "0.41"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rodio = { version = "0.21", default-features = false, features = ["playback", "symphonia-flac", "symphonia-aac", "symphonia-isomp4", "symphonia-mp3", "symphonia-wav", "symphonia-pcm"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+symphonia = { version = "0.5", default-features = false, features = ["flac", "aac", "isomp4", "mp3", "wav", "pcm"] }
+url = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+[features]
+auth-broker = ["dep:tiny_http"]
+
+[dependencies.tiny_http]
+version = "0.12"
+optional = true
+
+[[bin]]
+name = "undertow-auth-broker"
+path = "src/bin/auth-broker.rs"
+required-features = ["auth-broker"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_Graphics_DirectWrite", "Win32_System_LibraryLoader", "Win32_UI_HiDpi"] }
+windows-core = "0.62.2"
+winreg = "0.55"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+debug = 0
+
+
+[patch.crates-io]
+symphonia-format-isomp4 = { path = "vendor/symphonia-format-isomp4" }

@@ -1,0 +1,39 @@
+{
+  "sha256": "a9e0ad8b68762a5b02eb601219fce3a0cd3f6cc14ddbad3e0533aec4d4984df5",
+  "phase": "after",
+  "results": [
+    {
+      "name": "tracks",
+      "working_set_bytes": 69521408,
+      "private_bytes": 54603776,
+      "cpu_percent_one_core": 4.657531116033881,
+      "audio_underrun_samples": 0,
+      "duration_seconds": 8.0655625
+    },
+    {
+      "name": "filtered",
+      "working_set_bytes": 70000640,
+      "private_bytes": 56127488,
+      "cpu_percent_one_core": 4.852801682514949,
+      "audio_underrun_samples": 0,
+      "duration_seconds": 8.0628605
+    },
+    {
+      "name": "small",
+      "working_set_bytes": 47656960,
+      "private_bytes": 32849920,
+      "cpu_percent_one_core": 2.7204360637022527,
+      "audio_underrun_samples": 0,
+      "duration_seconds": 8.0550824
+    },
+    {
+      "name": "lyrics",
+      "working_set_bytes": 85561344,
+      "private_bytes": 70078464,
+      "cpu_percent_one_core": 32.49087132918492,
+      "audio_underrun_samples": 0,
+      "duration_seconds": 8.00366
+    }
+  ],
+  "scope": "Eight-second invisible software-renderer workloads with generated local muted PCM/lyrics/art, an isolated 1200-track library and a 30fps cap. Not visible GPU, live TIDAL streaming or sustained idle measurements."
+}

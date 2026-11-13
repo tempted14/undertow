@@ -1,0 +1,21 @@
+{
+  "version": "0.1.1",
+  "date": "2026-11-13",
+  "executable_sha256": "16d708e1ac196c8c4ccf41fc9f9b36beaf4b94d13e7b9eff5013eda8259854d2",
+  "app_tests_passed": 100,
+  "renderer_tests_passed": 5,
+  "optional_broker_release_built": true,
+  "production_source_parity_verified": true,
+  "ui_captures_reviewed": 25,
+  "final_binary_ui_checks": [
+    "home",
+    "lyrics",
+    "general",
+    "about"
+  ],
+  "known_vulnerabilities": 0,
+  "informational_dependency_warnings": [
+    "RUSTSEC-2026-0192"
+  ],
+  "external_live_integration_verification": "Not performed in this audit; see docs/VALIDATION.md."
+}

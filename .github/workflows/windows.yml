@@ -1,0 +1,74 @@
+name: Windows validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install tested Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          rustup default 1.99.1
+      - name: Check repository hygiene
+        run: python scripts/check-repository.py
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Tests
+        run: cargo test --locked --all-targets --all-features
+      - name: Strict Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Release desktop
+        run: cargo build --release --locked --bin undertow
+      - name: Release optional broker
+        run: cargo build --release --locked --features auth-broker --bin undertow-auth-broker
+      - name: Invisible generated UI checks
+        run: python scripts/ui-smoke.py --screens home lyrics general
+      - name: Package clean source and portable app
+        shell: pwsh
+        run: ./scripts/package.ps1 -OutputDirectory ./dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: undertow-windows-x64
+          path: |
+            dist/Undertow.exe
+            dist/Undertow-Windows-x64.zip
+            dist/Undertow-source.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+  dependencies:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan pinned dependencies with verified RustSec tool
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'cargo-audit.zip'
+          Invoke-WebRequest 'https://github.com/rustsec/rustsec/releases/download/cargo-audit/v0.23.0/cargo-audit-x86_64-pc-windows-msvc-v0.23.0.zip' -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'aafeb61206730029601a72e669a12231f8674427e6248d02f6cb382cb36d56b4') { throw 'RustSec download checksum mismatch' }
+          $destination = Join-Path $env:RUNNER_TEMP 'audit-tool'
+          Expand-Archive -LiteralPath $zip -DestinationPath $destination
+          $tool = (Get-ChildItem $destination -Filter cargo-audit.exe -Recurse | Select-Object -First 1).FullName
+          & $tool audit --file Cargo.lock --db (Join-Path $env:RUNNER_TEMP 'advisory-db') --json > dependency-audit.json
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency audit failed; inspect the report' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dependency-audit
+          path: dependency-audit.json
+          if-no-files-found: warn

@@ -1,0 +1,9 @@
+{
+  "new_conversion_buffer_allocations_per_batch": 1,
+  "new_median_ms": 44.660199999999996,
+  "old_conversion_buffer_allocations_per_batch": 10000,
+  "old_median_ms": 51.802,
+  "removed_redundant_sample_bytes": 32768,
+  "scope": "4096-frame stereo f32 conversion/interleaving, 10000 packets per batch, nine alternating-order batches. Original allocation+copy algorithm versus the production reusable buffer; not whole-player CPU or RAM.",
+  "speedup": 1.159914196532931
+}
