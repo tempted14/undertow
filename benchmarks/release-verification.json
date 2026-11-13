@@ -1,8 +1,7 @@
 {
   "version": "0.1.1",
   "date": "2026-11-13",
-  "executable_sha256": "16d708e1ac196c8c4ccf41fc9f9b36beaf4b94d13e7b9eff5013eda8259854d2",
-  "app_tests_passed": 100,
+  "app_tests_passed": 101,
   "renderer_tests_passed": 5,
   "optional_broker_release_built": true,
   "production_source_parity_verified": true,
@@ -17,5 +16,11 @@
   "informational_dependency_warnings": [
     "RUSTSEC-2026-0192"
   ],
-  "external_live_integration_verification": "Not performed in this audit; see docs/VALIDATION.md."
+  "external_live_integration_verification": "Not performed in this audit; see docs/VALIDATION.md.",
+  "executable_checksum_location": "Release asset SHA256SUMS.txt",
+  "release_checks": [
+    "Compiler path remapping",
+    "ASCII and UTF-16 local-home-path inspection",
+    "Archive integrity and source parity"
+  ]
 }

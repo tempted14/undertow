@@ -29,16 +29,18 @@ jobs:
         run: cargo test --locked --all-targets --all-features
       - name: Strict Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - name: Release desktop
-        run: cargo build --release --locked --bin undertow
-      - name: Release optional broker
-        run: cargo build --release --locked --features auth-broker --bin undertow-auth-broker
+      - name: Release desktop and optional broker with private paths remapped
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -IncludeBroker
+      - name: Inspect executable privacy
+        run: python scripts/check-release.py
       - name: Invisible generated UI checks
         run: python scripts/ui-smoke.py --screens home lyrics general
       - name: Package clean source and portable app
         shell: pwsh
         run: ./scripts/package.ps1 -OutputDirectory ./dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true # Validation still fails on build/test errors; artifact storage may be full.
         with:
           name: undertow-windows-x64
           path: |
@@ -68,6 +70,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependency audit failed; inspect the report' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
+        continue-on-error: true # The scan itself remains a required step.
         with:
           name: dependency-audit
           path: dependency-audit.json

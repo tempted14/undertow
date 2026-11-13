@@ -7,7 +7,7 @@ Windows x64, Rust 1.99.1. All checks use the pinned lockfile and local patches.
 | Check | Result |
 |---|---|
 | cargo fmt --all --check | Passed |
-| cargo test --locked --offline --all-targets --all-features | 100 app tests and 5 renderer integration tests passed; broker target has 0 tests |
+| cargo test --locked --offline --all-targets --all-features | 101 app tests and 5 renderer integration tests passed; broker target has 0 tests |
 | Explicit audio conversion benchmark | Measured separately; intentionally ignored in ordinary unit tests |
 | cargo clippy --locked --offline --all-targets --all-features -- -D warnings | Passed |
 | Optimized desktop build | Passed |
@@ -49,4 +49,4 @@ The dependency warning is ttf-parser 0.25.1 (RUSTSEC-2026-0192), transitively re
 
 Run the build/test commands in README.md. Run python scripts/ui-smoke.py for invisible generated captures; outputs are ignored under artifacts/. Use an isolated UNDERTOW_DATA_DIR for live diagnostics. Existing --validate-live and optional --playlist-roundtrip checks are available for deliberate account verification; the latter creates and deletes one temporary playlist and must not be mistaken for a read-only test.
 
-Release archives use an explicit source allowlist. Sessions, settings, account libraries, local caches, historical private diagnostics and the enclosing workspace Git history are excluded. Only the verified GitHub noreply identity is used for this repository's original commit.
+Release archives use an explicit source allowlist. Sessions, settings, account libraries, local caches, historical private diagnostics and the enclosing workspace Git history are excluded. Compiler paths in distributed binaries are remapped to neutral build prefixes and scanned before packaging. Only the verified GitHub noreply identity is used for this repository's original commits. GitHub artifact uploads are optional because the account artifact-storage quota is currently full; test/build/security failures still fail CI, and reviewed releases carry the distribution files.

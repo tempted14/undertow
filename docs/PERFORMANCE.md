@@ -21,14 +21,14 @@ Four identical eight-second workloads used generated local PCM/audio/art/lyrics,
 | small | 47.04 → 47.66 | 32.34 → 32.85 | 3.11% → 2.72% |
 | lyrics | 85.58 → 85.56 | 70.32 → 70.08 | 37.16% → 32.49% |
 
-Both passes reported **zero audio underrun samples**. Filtered-view CPU increased in this short sample; this result is retained rather than excluded. Scheduling, allocator and background-load variance make these directional observations, not statistically established whole-app gains. The final binary differs from the measured binary only in the About page version label; measured hashes are retained in the JSON evidence.
+Both passes reported **zero audio underrun samples**. Filtered-view CPU increased in this short sample; this result is retained rather than excluded. Scheduling, allocator and background-load variance make these directional observations, not statistically established whole-app gains. Measurements precede the final queued-library-event guard, About version label and compiler path-remapping changes. Those edits leave the measured decoder/rendering workload unchanged, but these figures are not a repeated measurement of the final release binary. Measured hashes are retained in the JSON evidence.
 
 These samples do not measure visible GPU/DWM memory, 120 Hz frame pacing, live TIDAL bandwidth, startup latency, long-session memory growth or all plugins enabled together. They do not establish a universal 90 MB ceiling. No working-set trimming or disabled product feature is used to obtain these numbers. Use scripts/benchmark.ps1 with an actual audio file for longer, machine-specific measurements.
 
 ## Bounded work and responsiveness
 
 - Album metadata retains 32 recent pages; browsing 5,000 fixture IDs verifies eviction and reload behavior.
-- Library refresh, favorites and collection-state reads use a lazy independent lane. Mock HTTP tests hold a refresh while playback requests proceed, then verify that stale refresh results cannot overwrite later edits.
+- Library refresh, favorites and collection-state reads use a lazy independent lane. Mock HTTP tests hold a refresh while playback requests proceed, then verify that stale refresh results cannot overwrite later edits. A separate queued-event regression covers results already waiting for the UI before invalidation.
 - Existing bounded streaming PCM/spool queues, artwork caches, account cancellation, search debouncing, native font fallback, renderer selection and plugin controls remain intact.
 - Public evidence contains aggregate numbers and original fixtures only. Runtime account data and machine-specific reports are excluded.
 

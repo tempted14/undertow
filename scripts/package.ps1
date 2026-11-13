@@ -5,6 +5,8 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $outputRoot = (Resolve-Path -LiteralPath $OutputDirectory).Path
 $releaseExe = Join-Path $sourceRoot 'target\release\undertow.exe'
 if (-not (Test-Path -LiteralPath $releaseExe)) { throw 'Build the release desktop executable first.' }
+& python (Join-Path $PSScriptRoot 'check-release.py') $releaseExe
+if ($LASTEXITCODE -ne 0) { throw 'Release privacy check failed; use scripts/build-release.ps1.' }
 $outputExe = Join-Path $outputRoot 'Undertow.exe'
 if (-not (Test-Path -LiteralPath $outputExe) -or (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $outputExe -Algorithm SHA256).Hash) {
     Copy-Item -LiteralPath $releaseExe -Destination $outputExe -Force

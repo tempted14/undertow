@@ -7,6 +7,7 @@ struct Job {
     epoch: u64,
     cancelled: Arc<AtomicBool>,
     search_revision: u64,
+    library: bool,
 }
 
 pub(super) struct Reader {
@@ -65,11 +66,16 @@ impl Reader {
                             && (job.search_revision == 0
                                 || job.search_revision == latest.load(Ordering::Acquire))
                         {
-                            emit(
-                                &events,
-                                &ctx,
-                                Event::CatalogRead(job.epoch, Box::new(event)),
-                            );
+                            let event = if job.library {
+                                Event::LibraryRead(
+                                    job.epoch,
+                                    job.cancelled.clone(),
+                                    Box::new(event),
+                                )
+                            } else {
+                                Event::CatalogRead(job.epoch, Box::new(event))
+                            };
+                            emit(&events, &ctx, event);
                         }
                     };
                     let result = (|| -> anyhow::Result<()> {
@@ -211,6 +217,7 @@ impl Reader {
             epoch: self.epoch.load(Ordering::Acquire),
             cancelled,
             search_revision,
+            library,
         };
         if let Err(error) = lane.try_send(job) {
             let (mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job)) = error;
@@ -226,11 +233,12 @@ impl Reader {
                 Command::Similar(id) => Event::Similar(id, Err(message)),
                 _ => Event::Error(message),
             };
-            emit(
-                &self.events,
-                &self.ctx,
-                Event::CatalogRead(job.epoch, Box::new(event)),
-            );
+            let event = if job.library {
+                Event::LibraryRead(job.epoch, job.cancelled, Box::new(event))
+            } else {
+                Event::CatalogRead(job.epoch, Box::new(event))
+            };
+            emit(&self.events, &self.ctx, event);
         }
     }
 }
@@ -296,6 +304,45 @@ mod tests {
             .unwrap()
             .for_catalog_epoch(epoch.load(Ordering::Acquire))
             .unwrap()
+    }
+
+    #[test]
+    fn refresh_already_queued_for_ui_is_rejected_after_a_mutation() {
+        let (events, rx) = mpsc::sync_channel(1);
+        let epoch = Arc::new(AtomicU64::new(0));
+        let mut reads = Reader::start(events.clone(), egui::Context::default(), epoch.clone());
+        let previous = reads.library_cancelled.clone();
+        events
+            .send(Event::LibraryRead(
+                0,
+                previous,
+                Box::new(Event::Playlists(vec![])),
+            ))
+            .unwrap();
+        reads.invalidate_library();
+        assert!(rx.recv().unwrap().for_catalog_epoch(0).is_none());
+        let fresh = Event::LibraryRead(
+            0,
+            reads.library_cancelled.clone(),
+            Box::new(Event::Playlists(vec![])),
+        );
+        assert!(matches!(
+            fresh.for_catalog_epoch(0),
+            Some(Event::Playlists(_))
+        ));
+        assert!(matches!(
+            Event::CatalogRead(0, Box::new(Event::Notice("catalog".into()))).for_catalog_epoch(0),
+            Some(Event::Notice(_))
+        ));
+        assert!(
+            Event::LibraryRead(
+                0,
+                reads.library_cancelled.clone(),
+                Box::new(Event::Playlists(vec![]))
+            )
+            .for_catalog_epoch(1)
+            .is_none()
+        );
     }
 
     #[test]

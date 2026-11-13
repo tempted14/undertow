@@ -1085,7 +1085,9 @@ impl App {
             };
             match event {
                 Event::Mix(..) => unreachable!("mix results converted above"),
-                Event::CatalogRead(_, _) => unreachable!("catalog events are unwrapped once"),
+                Event::CatalogRead(..) | Event::LibraryRead(..) => {
+                    unreachable!("catalog events are unwrapped once")
+                }
                 Event::Avatar(image) => {
                     self.avatar =
                         Some(ctx.load_texture("profile-picture", *image, TextureOptions::LINEAR));

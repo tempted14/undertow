@@ -22,13 +22,13 @@ See [feature details](docs/FEATURES.md), [the 16-plugin compatibility matrix](do
 
 Windows x64, Visual Studio C++ Build Tools and a current Rust toolchain are required. This release was tested with Rust 1.99.1.
 
-    cargo build --release --locked --bin undertow
+    ./scripts/build-release.ps1 -IncludeBroker
     cargo fmt --all --check
     cargo test --locked --all-targets --all-features
     cargo clippy --locked --all-targets --all-features -- -D warnings
     ./scripts/package.ps1 -OutputDirectory ./dist
 
-The optional server-side authentication broker remains available with --features auth-broker; see [deployment instructions](docs/AUTH-BROKER.md). Never bundle confidential broker credentials in the desktop application.
+Release builds remap local compiler paths; packaging verifies the executable contains no local Windows home paths. The optional server-side authentication broker remains available with --features auth-broker; see [deployment instructions](docs/AUTH-BROKER.md). Never bundle confidential broker credentials in the desktop application.
 
 ## Performance and UI verification
 

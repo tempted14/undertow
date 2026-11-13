@@ -53,6 +53,7 @@ pub enum Command {
 }
 pub enum Event {
     CatalogRead(u64, Box<Event>),
+    LibraryRead(u64, Arc<AtomicBool>, Box<Event>),
     Avatar(Box<egui::ColorImage>),
     PickedFont(String),
     PlaylistImage(u64, Result<Box<PlaylistImage>, String>),
@@ -85,6 +86,9 @@ impl Event {
     pub(crate) fn for_catalog_epoch(self, current: u64) -> Option<Self> {
         match self {
             Self::CatalogRead(epoch, event) => (epoch == current).then_some(*event),
+            Self::LibraryRead(epoch, cancelled, event) => {
+                (epoch == current && !cancelled.load(Ordering::Acquire)).then_some(*event)
+            }
             event => Some(event),
         }
     }
