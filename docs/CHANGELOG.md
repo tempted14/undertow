@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 — 2026-11-13
+## 0.2.1 — 2026-11-14
 
 - Ease lyric line/word clicks and resync over 340 ms, with rapid retargeting, manual-scroll cancellation, reduced-motion support and layout-change cancellation.
 - Recycle bounded PCM packets instead of allocating a fresh vector for each decode batch. Retain the 16-packet queue and 4,096-sample packets; the pool covers producer/consumer buffers as well.

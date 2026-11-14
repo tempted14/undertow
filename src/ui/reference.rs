@@ -1670,6 +1670,7 @@ impl App {
         });
         if let Some(seconds) = seek_request {
             self.seek_lyric(seconds);
+            ui.ctx().request_repaint();
         }
     }
 }

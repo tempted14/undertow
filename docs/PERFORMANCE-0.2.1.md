@@ -1,4 +1,4 @@
-# 0.2.1 lyric navigation and playback performance — 13 November 2026
+# 0.2.1 lyric navigation and playback performance — 14 November 2026
 
 Tapping a synchronized lyric line or word now uses a short 340 ms quintic transition instead of snapping the reading position. A second tap retargets from the current position. Manual scrolling cancels the transition; resync eases back to the current line. The animation follows the existing motion-speed setting and reduced-motion preference. Resizing or changing lyric layout clears stale geometry. Audio seeks still use the exact lyric timestamps and timing offset. The view waits briefly for the decoder position before beginning a seek transition and resumes demand-driven repainting when settled.
 
@@ -14,20 +14,20 @@ The official 0.2.0 executable and final 0.2.1 executable each ran the same origi
 
 | Workload | CPU 0.2.0 → 0.2.1 | Working set MB | Private MB |
 |---|---:|---:|---:|
-| Tracks, software | 3.53% → 2.35% | 61.8 → 53.2 | 38.3 → 39.1 |
-| Line lyrics, software | 6.85% → 6.33% | 65.3 → 65.5 | 50.3 → 50.8 |
-| Word lyrics, software | 25.10% → 20.43% | 64.8 → 69.3 | 50.3 → 54.3 |
-| Line lyrics, OpenGL | 3.28% → 2.22% | 181.8 → 118.5 | 293.3 → 219.2 |
+| Tracks, software | 3.53% → 2.98% | 61.8 → 53.2 | 38.3 → 38.3 |
+| Line lyrics, software | 6.85% → 6.25% | 65.3 → 65.1 | 50.3 → 50.3 |
+| Word lyrics, software | 25.10% → 22.09% | 64.8 → 64.7 | 50.3 → 49.7 |
+| Line lyrics, OpenGL | 3.28% → 2.39% | 181.8 → 120.7 | 293.3 → 219.4 |
 
 All four steady final workloads used 18 PCM vectors, consumed approximately 18 seconds of audio, and reported zero underrun samples. Each recorded 196 decoder park attempts. Source sample counters and the word-fill frame count remain unchanged in behavior.
 
-These are short process observations, not universal savings or a controlled attribution of each byte. Software memory is broadly similar and word-lyrics memory increased in this pass. Graphics allocation varies: this identical 0.2.0 binary previously measured around 119 MB working set, so the larger OpenGL difference here must not be attributed solely to the PCM change. GPU utilization counters were unavailable in this comparison; no GPU percentage improvement is claimed. The visible GPU application can still exceed 90 MB. The change bounds PCM storage and reduces allocation churn rather than trimming the process or removing functionality.
+These are short process observations, not universal savings or a controlled attribution of each byte. Software memory is broadly similar; modest changes in either direction can reflect renderer/allocator variation. Graphics allocation varies: this identical 0.2.0 binary previously measured around 119 MB working set, so the larger OpenGL difference here must not be attributed solely to the PCM change. GPU utilization counters were unavailable in this comparison; no GPU percentage improvement is claimed. The visible GPU application can still exceed 90 MB. The change bounds PCM storage and reduces allocation churn rather than trimming the process or removing functionality.
 
 ## Navigation, regressions and limitations
 
-A separate 11-second invisible check performs three forward/backward audio seeks, manual lyric browsing and resync. Its trace contains intermediate offsets during transitions, settles with automatic following restored, and retains the expected playback position. Three intentional queue resets produced 302 cumulative underrun samples (about 6.85 ms at the fixture's mono 44.1 kHz); the final three seconds added none. This is not gapless-seek certification.
+A separate 11-second invisible check performs three forward/backward audio seeks, manual lyric browsing and resync. Its trace contains intermediate offsets during transitions, settles with automatic following restored, and retains the expected playback position. Three intentional queue resets produced 415 cumulative underrun samples (about 9.41 ms at the fixture's mono 44.1 kHz); the final three seconds added none. This is not gapless-seek certification.
 
-107 Rust app tests, five renderer integration tests and three Python privacy tests pass (115 total). The explicit audio-conversion benchmark remains intentionally ignored by ordinary test execution. Formatting, strict all-feature Clippy, both remapped release targets and publication privacy checks pass. RustSec reports zero known vulnerability findings and the existing ttf-parser maintenance warning. New regression tests cover PCM recycling/order/clocks/stale epochs, producer notification/cancellation, and bounded time-based transitions in either direction. Invisible captures of Lyrics, Tracks and General settings were visually reviewed.
+107 Rust app tests, five renderer integration tests and three Python privacy tests pass (115 total). The explicit audio-conversion benchmark remains intentionally ignored by ordinary test execution. Formatting, strict all-feature Clippy, both remapped release targets and publication privacy checks pass. RustSec reports zero known vulnerability findings and the existing ttf-parser maintenance warning. New regression tests cover PCM recycling/order/clocks/stale epochs, producer notification/cancellation, and bounded time-based transitions in either direction. Invisible captures of Lyrics, Tracks and General settings were visually reviewed. An isolated two-second audio file also reached EOF and the application exited normally after a seven-second diagnostic.
 
 The fixtures do not revalidate live TIDAL sign-in, entitlements, remote provider delivery, Discord acknowledgment, every input gesture, every monitor/DPI configuration or long-term memory behavior. No account data or secrets are included in the evidence. Existing DPAPI storage, public-client authentication and server-only confidential broker credentials are unchanged; the [0.2.0 credential audit](PERFORMANCE-0.2.0.md) still applies.
 
