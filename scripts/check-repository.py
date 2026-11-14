@@ -9,6 +9,8 @@ import sys
 root = Path(__file__).resolve().parents[1]
 excluded = {'.git', 'target', 'dist', 'artifacts', '__pycache__'}
 forbidden = json.loads(os.environ.get('UNDERTOW_FORBIDDEN_EMAILS', '[]'))
+secrets = json.loads(os.environ.get('UNDERTOW_FORBIDDEN_SECRETS', '[]'))
+secrets += [value for name, value in os.environ.items() if 'TIDAL' in name.upper() and any(part in name.upper() for part in ['SECRET', 'API_KEY', 'DEVELOPER_KEY']) and len(value) > 8]
 errors = []
 for path in root.rglob('*'):
     relative = path.relative_to(root)
@@ -28,6 +30,10 @@ for path in root.rglob('*'):
         continue
     if re.search(r'(?i)[a-z]:[\\/]+users[\\/]+', content):
         errors.append(f'{relative}: machine-specific path')
+    if any(secret and secret in content for secret in secrets):
+        errors.append(f'{relative}: configured credential')
+    if path.suffix.lower() in {'.pem', '.pfx', '.p12'} or path.name == '.env' or path.name.startswith('.env.'):
+        errors.append(f'{relative}: private credential/config file')
     if any(email and email.lower() in content.lower() for email in forbidden):
         errors.append(f'{relative}: forbidden personal address')
     if re.search(r'\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b', content):
@@ -41,7 +47,7 @@ for path in root.rglob('*'):
         def check(item):
             if isinstance(item, dict):
                 for key, child in item.items():
-                    if key.lower() in {'access_token', 'refresh_token', 'client_secret', 'password'} and child:
+                    if key.lower() in {'access_token', 'refresh_token', 'client_secret', 'password', 'api_key', 'private_key'} and child:
                         errors.append(f'{relative}: populated credential field')
                     check(child)
             elif isinstance(item, list):

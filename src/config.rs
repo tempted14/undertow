@@ -118,6 +118,26 @@ pub fn write_json<T: Serialize>(p: &Path, v: &T) -> Result<()> {
 }
 
 impl Settings {
+    /// Diagnostics must never export developer identifiers, broker URLs, private
+    /// file paths or profile text. Persistence still retains all user settings.
+    pub fn diagnostic(&self) -> serde_json::Value {
+        let mut value = serde_json::to_value(self).unwrap_or_default();
+        if let Some(object) = value.as_object_mut() {
+            for name in [
+                "client_id",
+                "redirect_uri",
+                "token_broker",
+                "font_path",
+                "discord_client_id",
+                "downloads",
+                "profile_name",
+            ] {
+                object.remove(name);
+            }
+        }
+        value
+    }
+
     pub fn load() -> Self {
         {
             let mut s: Self = read_json(&data_dir().join("settings.json")).unwrap_or_default();
@@ -220,5 +240,33 @@ mod tests {
         let round: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(s.motion_speed, round.motion_speed);
         assert_eq!(round.volume, 0.4);
+    }
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    #[test]
+    fn diagnostic_redacts_private_settings_without_changing_saved_configuration() {
+        let settings = super::Settings {
+            client_id: "private-id-fixture".into(),
+            token_broker: "https://example.invalid/?key=secret-fixture".into(),
+            downloads: "private-path-fixture".into(),
+            profile_name: "private-profile-fixture".into(),
+            ..Default::default()
+        };
+        let report = settings.diagnostic().to_string();
+        for value in [
+            "private-id-fixture",
+            "secret-fixture",
+            "private-path-fixture",
+            "private-profile-fixture",
+        ] {
+            assert!(!report.contains(value));
+        }
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["client_id"],
+            "private-id-fixture"
+        );
+        assert_eq!(settings.diagnostic()["lyric_glow"], settings.lyric_glow);
     }
 }

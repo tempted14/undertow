@@ -23,6 +23,16 @@ pub fn follow_scroll(position: &mut f32, velocity: &mut f32, target: f32, dt: f3
     }
 }
 
+/// A sleeping UI must not consume the idle interval as the first spring step.
+pub fn follow_step(elapsed: f32, line_age: f32, changed: bool) -> f32 {
+    let dt = elapsed.clamp(0., 0.1);
+    if changed {
+        dt.min(line_age.max(0.))
+    } else {
+        dt
+    }
+}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Word {
     pub text: String,
@@ -59,6 +69,29 @@ impl Lyrics {
             .map(|l| l.text.as_str())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    /// Zero means a word fill is moving; otherwise wake at the next visible
+    /// timestamp. Playing audio alone does not require a display-rate redraw.
+    pub fn next_visual_change(&self, seconds: f64, animate_words: bool) -> Option<f64> {
+        if !self.synced || !seconds.is_finite() {
+            return None;
+        }
+        let active = self.active(seconds);
+        let next_line = self.lines.get(active.map_or(0, |i| i + 1)).map(|l| l.start);
+        let mut next = next_line;
+        if let Some(line) = active.and_then(|i| self.lines.get(i)) {
+            for word in &line.words {
+                let end = word.start + (word.end - word.start).max(0.06);
+                if animate_words && seconds >= word.start && seconds < end {
+                    return Some(0.);
+                }
+                if word.start > seconds && next.is_none_or(|n| word.start < n) {
+                    next = Some(word.start);
+                }
+            }
+        }
+        next.filter(|n| n.is_finite())
+            .map(|n| (n - seconds).max(0.))
     }
     pub fn word_synced(&self) -> bool {
         self.lines.iter().any(|l| !l.words.is_empty())
@@ -478,5 +511,37 @@ mod tests {
         assert_eq!(refreshed.active(3.), None);
         assert_eq!(refreshed.active(5.), Some(0));
         assert_eq!(refreshed.lines[0].text, "Corrected timing");
+    }
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    #[test]
+    fn settled_lines_sleep_until_the_next_timestamp_but_words_keep_their_fill() {
+        assert_eq!(follow_step(0.2, 0.001, true), 0.001);
+        assert_eq!(follow_step(0.2, 3., false), 0.1);
+        let mut data = parse_lrc("[00:00.00]First line\n[00:06.00]Second line");
+        assert_eq!(data.next_visual_change(1., true), Some(5.));
+        assert_eq!(data.next_visual_change(-1., true), Some(1.));
+        assert_eq!(data.next_visual_change(7., true), None);
+        data.lines[0].words = vec![
+            Word {
+                text: "First".into(),
+                start: 1.,
+                end: 2.,
+            },
+            Word {
+                text: "line".into(),
+                start: 3.,
+                end: 4.,
+            },
+        ];
+        assert_eq!(data.next_visual_change(1.5, true), Some(0.));
+        assert_eq!(data.next_visual_change(2.5, true), Some(0.5));
+        assert_eq!(data.next_visual_change(1.5, false), Some(1.5));
+        assert_eq!(data.next_visual_change(f64::NAN, true), None);
+        data.synced = false;
+        assert_eq!(data.next_visual_change(1., true), None);
     }
 }

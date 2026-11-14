@@ -1361,7 +1361,12 @@ impl App {
                 let target = active
                     .map(|i| (self.lyric_offsets[i] - lyrics_rect.height() * 0.38).max(0.))
                     .unwrap_or(0.);
-                let dt = self.animation_clock.elapsed().as_secs_f32().min(0.1);
+                let dt = crate::lyrics::follow_step(
+                    self.animation_clock.elapsed().as_secs_f32(),
+                    active.map_or(0., |i| (position - data.lines[i].start) as f32),
+                    target != self.lyric_follow_target,
+                );
+                self.lyric_follow_target = target;
                 self.animation_clock = Instant::now();
                 let seeked = self
                     .lyric_last_position
@@ -1386,6 +1391,7 @@ impl App {
                     && (self.lyric_velocity.abs() > 0.05
                         || (self.lyric_scroll - target).abs() > 0.02)
                 {
+                    self.lyric_frame_motion = true;
                     ui.ctx().request_repaint();
                 }
             } else {
@@ -1423,6 +1429,14 @@ impl App {
                         })
                         .clone();
                     let active_line = active == Some(i);
+                    if active_line
+                        && self.audio.is_some()
+                        && !self.paused()
+                        && data.next_visual_change(position, self.settings.animated_lyrics)
+                            == Some(0.)
+                    {
+                        self.lyric_frame_motion = true;
+                    }
                     let area = Rect::from_min_size(
                         origin + vec2(0., offsets[i]),
                         vec2(text_width, offsets[i + 1] - offsets[i]),

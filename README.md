@@ -32,6 +32,8 @@ Release builds remap local compiler paths; packaging verifies the executable con
 
 ## Performance and UI verification
 
+Version 0.2.0 uses demand-driven lyric repainting, immutable file-backed system fonts and redacted diagnostics. See the [matched CPU/GPU/RAM measurements and credential audit](docs/PERFORMANCE-0.2.0.md).
+
 The audio conversion hot path reuses its sample storage, library reads run separately from playback/edit requests, and album metadata uses a bounded recent-item cache. Results and limitations are recorded in [the audit](docs/VALIDATION.md) and [performance measurements](docs/PERFORMANCE.md).
 
 Generate isolated, invisible UI checks with python scripts/ui-smoke.py. This uses original test audio/artwork/text and never signs into an account or controls the desktop. Raw reports and captures go to ignored artifacts/ storage.

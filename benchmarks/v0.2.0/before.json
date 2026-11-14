@@ -1,0 +1,50 @@
+{
+  "sha256": "02c822d7e5ac8fbdbbb8568c16b5a5bbb12520e6fb4f8ac58ab48d2856ba5c90",
+  "results": [
+    {
+      "name": "tracks",
+      "renderer": "software",
+      "working_set_bytes": 77996032,
+      "private_bytes": 55808000,
+      "cpu_percent_one_core": 3.1410116388789877,
+      "ui_frames": 131,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 18.111541950113377,
+      "duration_seconds": 18.1922
+    },
+    {
+      "name": "line-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 82960384,
+      "private_bytes": 68517888,
+      "cpu_percent_one_core": 22.73054152579279,
+      "ui_frames": 2742,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.971723356009072,
+      "duration_seconds": 18.0042904
+    },
+    {
+      "name": "word-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 85581824,
+      "private_bytes": 70615040,
+      "cpu_percent_one_core": 23.00954870383175,
+      "ui_frames": 2747,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.959750566893423,
+      "duration_seconds": 18.0060531
+    },
+    {
+      "name": "gpu-line-lyrics",
+      "renderer": "OpenGL",
+      "working_set_bytes": 205103104,
+      "private_bytes": 334049280,
+      "cpu_percent_one_core": 17.135283348664267,
+      "ui_frames": 2942,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.9797052154195,
+      "duration_seconds": 18.0165213
+    }
+  ],
+  "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts. Baseline is 0.1.1 with only hidden-OpenGL and UI-frame-count instrumentation."
+}

@@ -168,6 +168,8 @@ pub struct App {
     lyric_scroll: f32,
     lyric_manual_scroll: bool,
     lyric_velocity: f32,
+    lyric_frame_motion: bool,
+    lyric_follow_target: f32,
     animation_clock: Instant,
     playing_playlist: Option<String>,
     startup_started: Option<Instant>,
@@ -718,6 +720,8 @@ impl App {
             lyric_scroll: 0.0,
             lyric_manual_scroll: false,
             lyric_velocity: 0.,
+            lyric_frame_motion: false,
+            lyric_follow_target: 0.,
             animation_clock: Instant::now(),
             playing_playlist: None,
             startup_started: None,
@@ -1831,11 +1835,12 @@ impl App {
     }
     fn save_report(&self) {
         let a = self.audio.as_ref();
-        let details = serde_json::json!({"authenticated":self.connected,"playback_active":a.is_some_and(|a|!a.sink.is_paused()&&!a.sink.empty()),"tidal_stream":self.current.as_ref().is_some_and(|t|t.id>0&&t.local_path.is_empty()),"muted":self.muted,"codec":a.map(|a|&a.format.codec),"sample_rate":a.map(|a|a.format.sample_rate),"bits":a.map(|a|a.format.bit_depth),"output_rate":a.map(|a|a.format.output_rate),"played_seconds":self.position(),"underrun_samples":a.map(|a|a.stats.underrun_samples.load(Ordering::Relaxed)),"lyrics_synchronized":self.lyrics.synced,"lyrics_source":self.lyrics.source,"lyric_lines":self.lyrics.lines.len(),"word_synced":self.lyrics.word_synced(),"discord_status":self.presence_status,"discord_acknowledged":self.presence_status=="Rich Presence active","artwork_textures":self.artwork.len(),"frosted_backdrop_active":self.settings.frosted_glass&&!self.artwork.is_empty(),"floating_lyrics_pid":serde_json::Value::Null,"floating_lyrics_in_process":self.overlay_window.as_ref().is_some_and(|w|w.is_alive()),"display_refresh_hz":self.display_refresh_hz,"renderer":if crate::software_mode(){ "software" }else{ "OpenGL" },"settings":self.settings,"integrated_plugin_features":16,"all_16_live_validated":false,"limitations":"Account playlist round trips, protected/offline entitlement, remote lyric/translation providers and Discord acknowledgment must be validated with live accounts. Local playback measurements alone do not validate the requested full scenario."});
+        let details = serde_json::json!({"authenticated":self.connected,"playback_active":a.is_some_and(|a|!a.sink.is_paused()&&!a.sink.empty()),"tidal_stream":self.current.as_ref().is_some_and(|t|t.id>0&&t.local_path.is_empty()),"muted":self.muted,"codec":a.map(|a|&a.format.codec),"sample_rate":a.map(|a|a.format.sample_rate),"bits":a.map(|a|a.format.bit_depth),"output_rate":a.map(|a|a.format.output_rate),"played_seconds":self.position(),"underrun_samples":a.map(|a|a.stats.underrun_samples.load(Ordering::Relaxed)),"lyrics_synchronized":self.lyrics.synced,"lyrics_source":self.lyrics.source,"lyric_lines":self.lyrics.lines.len(),"word_synced":self.lyrics.word_synced(),"discord_status":self.presence_status,"discord_acknowledged":self.presence_status=="Rich Presence active","artwork_textures":self.artwork.len(),"frosted_backdrop_active":self.settings.frosted_glass&&!self.artwork.is_empty(),"floating_lyrics_pid":serde_json::Value::Null,"floating_lyrics_in_process":self.overlay_window.as_ref().is_some_and(|w|w.is_alive()),"display_refresh_hz":self.display_refresh_hz,"renderer":if crate::software_mode(){ "software" }else{ "OpenGL" },"settings":self.settings.diagnostic(),"integrated_plugin_features":16,"all_16_live_validated":false,"limitations":"Account playlist round trips, protected/offline entitlement, remote lyric/translation providers and Discord acknowledgment must be validated with live accounts. Local playback measurements alone do not validate the requested full scenario."});
         let mut details = details;
         details["lyrics_ui_hidden"] =
             serde_json::json!(self.page == Page::Lyrics && self.lyrics_chrome_hidden);
         details["lyric_request_pending"] = serde_json::json!(self.lyric_request.pending);
+        details["ui_frames"] = serde_json::json!(self.frame);
         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);
         details["lyric_scroll_offset"] = serde_json::json!(self.lyric_scroll);
@@ -2037,6 +2042,7 @@ impl App {
             1.
         };
         let eased = reference::layout::ease(transition);
+        self.lyric_frame_motion = false;
         self.background(ctx);
         self.title_bar(ctx);
         self.player(ctx);
@@ -2196,11 +2202,7 @@ impl App {
             self.ui_motion_until = Instant::now() + Duration::from_millis(220);
         }
         let scrolling = Instant::now() < self.ui_motion_until;
-        let animating = (self.audio.is_some()
-            && !self.paused()
-            && self.page == Page::Lyrics
-            && self.now_tab == 2
-            && self.lyrics.synced)
+        let animating = self.lyric_frame_motion
             || (self.page == Page::Lyrics
                 && self.tab_started.elapsed() < Duration::from_millis(240))
             || scrolling
@@ -2219,7 +2221,10 @@ impl App {
         ctx.request_repaint_after(if animating && self.settings.animated_lyrics {
             Duration::from_secs_f64(1.0 / self.settings.fps.clamp(30, 240) as f64)
         } else if self.audio.is_some() && !self.paused() {
-            Duration::from_millis(200)
+            let next = self
+                .lyrics
+                .next_visual_change(self.lyric_position(), self.settings.animated_lyrics);
+            Duration::from_secs_f64(next.filter(|n| *n > 0.).unwrap_or(0.2).clamp(0.001, 0.2))
         } else {
             Duration::from_secs(1)
         });
@@ -2379,11 +2384,11 @@ fn style(ctx: &egui::Context) {
     s.animation_time = 0.12;
     ctx.set_style(s);
 }
-// Fixed installed fonts are process-lifetime resources. Borrow the same bytes in
-// font definitions and ab_glyph instead of retaining a second 13MB CJK Vec.
+// Installed fonts stay file-backed and shared across font styles. The same
+// complete font data and fallback order remain available at every DPI.
 fn system_font(file: &str) -> Option<&'static [u8]> {
     use std::sync::OnceLock;
-    type FontBytes = OnceLock<Option<Box<[u8]>>>;
+    type FontBytes = OnceLock<Option<crate::font_data::FontBytes>>;
     static REGULAR: FontBytes = OnceLock::new();
     static MEDIUM: FontBytes = OnceLock::new();
     static BOLD: FontBytes = OnceLock::new();
@@ -2403,12 +2408,11 @@ fn system_font(file: &str) -> Option<&'static [u8]> {
         };
         files.iter().find_map(|name| {
             let path = std::path::Path::new("C:\\Windows\\Fonts").join(name);
-            (std::fs::metadata(&path).ok()?.len() <= 20 * 1024 * 1024)
-                .then(|| std::fs::read(path).ok().map(Vec::into_boxed_slice))
-                .flatten()
+            crate::font_data::FontBytes::open(&path)
         })
     })
-    .as_deref()
+    .as_ref()
+    .map(crate::font_data::FontBytes::as_slice)
 }
 
 pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {

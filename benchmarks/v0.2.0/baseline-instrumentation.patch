@@ -1,0 +1,23 @@
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -21,7 +21,9 @@
+ /// display's refresh rate. `--software` selects the CPU rasterizer, which hidden
+ /// background diagnostics also use because they have no visible surface to sync to.
+ pub(crate) fn software_mode() -> bool {
+-    std::env::args().any(|a| a == "--software" || a == "--background-benchmark")
++    std::env::args().any(|a| a == "--software")
++        || (std::env::args().any(|a| a == "--background-benchmark")
++            && !std::env::args().any(|a| a == "--gpu-benchmark"))
+ }
+ 
+ fn main() {
+--- a/src/ui.rs
++++ b/src/ui.rs
+@@ -1836,6 +1836,7 @@
+         details["lyrics_ui_hidden"] =
+             serde_json::json!(self.page == Page::Lyrics && self.lyrics_chrome_hidden);
+         details["lyric_request_pending"] = serde_json::json!(self.lyric_request.pending);
++        details["ui_frames"] = serde_json::json!(self.frame);
+         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
+         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);
+         details["lyric_scroll_offset"] = serde_json::json!(self.lyric_scroll);

@@ -1,3 +1,9 @@
+# Current release validation
+
+For 0.2.0, see [the performance/credential audit](PERFORMANCE-0.2.0.md). It records 104 passing Rust app tests, five renderer tests, three Python privacy tests and the exact final-binary comparisons. Existing live-integration limits remain below. Final hidden UI captures cover Home, Tracks, Lyrics, General settings, Create playlist and Queue.
+
+---
+
 # Validation and feature retention — 13 November 2026
 
 ## Verified locally

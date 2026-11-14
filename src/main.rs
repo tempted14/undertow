@@ -6,6 +6,7 @@ mod cache;
 mod collection;
 mod config;
 mod discovery;
+mod font_data;
 mod lyric_fonts;
 mod lyrics;
 mod metrics;
@@ -21,7 +22,9 @@ mod worker;
 /// display's refresh rate. `--software` selects the CPU rasterizer, which hidden
 /// background diagnostics also use because they have no visible surface to sync to.
 pub(crate) fn software_mode() -> bool {
-    std::env::args().any(|a| a == "--software" || a == "--background-benchmark")
+    std::env::args().any(|a| a == "--software")
+        || (std::env::args().any(|a| a == "--background-benchmark")
+            && !std::env::args().any(|a| a == "--gpu-benchmark"))
 }
 
 fn main() {

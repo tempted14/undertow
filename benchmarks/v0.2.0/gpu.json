@@ -1,0 +1,187 @@
+{
+  "before": {
+    "samples": 14,
+    "mean_engine_percent_sum": 7.769206595043235,
+    "peak_dedicated_bytes": 116920320.0,
+    "peak_shared_bytes": 2707456.0,
+    "raw_samples": [
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.942211829128963,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 6.885990817757196,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.784776436757129,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.437537354283933,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.396736112291398,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.6414219480552426,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.160167834951308,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.107933148043212,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.105027642945604,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.086533142030968,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.486750194636177,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.071033607930094,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 7.304476886809669,
+        "dedicated_bytes": 116920320.0
+      },
+      {
+        "matched_instances": 23,
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 8.358295374984396,
+        "dedicated_bytes": 116920320.0
+      }
+    ]
+  },
+  "final": {
+    "samples": 14,
+    "mean_engine_percent_sum": 0.744973775870754,
+    "peak_dedicated_bytes": 115871744.0,
+    "peak_shared_bytes": 9109504.0,
+    "raw_samples": [
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.17354969472733553,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.20347500226494528,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.17758708829399844,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 9109504.0,
+        "engine_percent_sum": 0.6253164828222252,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 1.512504069648968,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.25480830246453307,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.3227289943179592,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.7046261028350548,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.20736625528937486,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.2801261294967513,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 3.0187694776482905,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 2.5769879045405073,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.13426837916633835,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      },
+      {
+        "shared_bytes": 2707456.0,
+        "engine_percent_sum": 0.23751897867427427,
+        "matched_instances": 23,
+        "dedicated_bytes": 115871744.0
+      }
+    ]
+  },
+  "scope": "14 one-second Windows GPU Engine and GPU Process Memory counter samples filtered to only the tested PID. Engine utilization values are summed across its engines, not total system GPU utilization. GPU baseline was a separate identical hidden OpenGL pass. No other process counters are retained."
+}
