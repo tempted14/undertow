@@ -34,6 +34,8 @@ pub struct Format {
 #[derive(Default)]
 pub struct AudioStats {
     pub downloaded: AtomicU64,
+    pub pcm_allocations: AtomicU64,
+    pub decoder_waits: AtomicU64,
     pub played_samples: AtomicU64,
     pub consumed_samples: AtomicU64,
     pub underrun_samples: AtomicU64,
@@ -570,6 +572,8 @@ struct Packet {
 }
 struct PcmSource {
     rx: mpsc::Receiver<Packet>,
+    recycle: mpsc::SyncSender<Vec<f32>>,
+    decoder_thread: std::thread::Thread,
     buffer: Vec<f32>,
     pos: usize,
     epoch: u64,
@@ -591,14 +595,22 @@ impl Iterator for PcmSource {
             self.epoch = epoch;
         }
         if self.pos >= self.buffer.len() {
+            if self.buffer.capacity() > 0 {
+                let _ = self.recycle.try_send(std::mem::take(&mut self.buffer));
+            }
             loop {
                 match self.rx.try_recv() {
                     Ok(p) if p.epoch == epoch => {
+                        self.decoder_thread.unpark();
                         self.buffer = p.samples;
                         self.pos = 0;
                         break;
                     }
-                    Ok(_) => continue,
+                    Ok(stale) => {
+                        let _ = self.recycle.try_send(stale.samples);
+                        self.decoder_thread.unpark();
+                        continue;
+                    }
                     Err(TryRecvError::Disconnected) => return None,
                     Err(TryRecvError::Empty) => {
                         if self.stats.done.load(Ordering::Acquire) {
@@ -615,6 +627,12 @@ impl Iterator for PcmSource {
         self.stats.played_samples.fetch_add(1, Ordering::Relaxed);
         self.stats.consumed_samples.fetch_add(1, Ordering::Relaxed);
         Some(s)
+    }
+}
+impl Drop for PcmSource {
+    fn drop(&mut self) {
+        self.stats.cancel.store(true, Ordering::Relaxed);
+        self.decoder_thread.unpark();
     }
 }
 impl Source for PcmSource {
@@ -634,6 +652,7 @@ impl Source for PcmSource {
 
 pub struct Audio {
     _stream: OutputStream,
+    decoder_thread: std::thread::Thread,
     pub sink: Sink,
     pub stats: Arc<AudioStats>,
     pub format: Format,
@@ -646,6 +665,7 @@ impl Audio {
         let sink = Sink::connect_new(stream.mixer());
         sink.set_volume(volume);
         let (tx, rx) = mpsc::sync_channel::<Packet>(PCM_PACKETS);
+        let (recycle_tx, recycle_rx) = mpsc::sync_channel::<Vec<f32>>(PCM_PACKETS + 2);
         let stats = p.stats.clone();
         let stats2 = stats.clone();
         let rate = p.format.sample_rate;
@@ -656,16 +676,17 @@ impl Audio {
             .len()
             .saturating_sub(p.decoder.position)
             .min(PCM_SAMPLES);
-        let first = Packet {
-            samples: p.decoder.by_ref().take(initial).collect(),
-            epoch: 0,
-        };
+        let mut samples = Vec::with_capacity(PCM_SAMPLES);
+        samples.extend(p.decoder.by_ref().take(initial));
+        stats.pcm_allocations.store(1, Ordering::Relaxed);
+        let first = Packet { samples, epoch: 0 };
         tx.try_send(first)
             .map_err(|_| anyhow::anyhow!("Cannot prime the audio queue"))?;
-        std::thread::Builder::new()
+        let decoder = std::thread::Builder::new()
             .name("flac-decode".into())
             .spawn(move || {
                 let mut epoch = 0;
+                let mut spare = None;
                 'decode: loop {
                     if stats2.cancel.load(Ordering::Relaxed) {
                         break;
@@ -674,7 +695,10 @@ impl Audio {
                     if current != epoch {
                         epoch = current;
                         let ms = stats2.seek_ms.load(Ordering::Acquire);
-                        if p.decoder.try_seek(Duration::from_millis(ms)).is_err() {
+                        if let Err(error) = p.decoder.try_seek(Duration::from_millis(ms)) {
+                            if let Ok(mut problem) = stats2.error.lock() {
+                                *problem = Some(format!("Audio seek failed: {error}"));
+                            }
                             stats2.done.store(true, Ordering::Release);
                             break;
                         }
@@ -682,8 +706,17 @@ impl Audio {
                             .played_samples
                             .store(ms * rate as u64 * channels as u64 / 1000, Ordering::Relaxed);
                     }
-                    let samples: Vec<f32> = p.decoder.by_ref().take(PCM_SAMPLES).collect();
+                    let mut samples = spare
+                        .take()
+                        .or_else(|| recycle_rx.try_recv().ok())
+                        .unwrap_or_else(|| {
+                            stats2.pcm_allocations.fetch_add(1, Ordering::Relaxed);
+                            Vec::with_capacity(PCM_SAMPLES)
+                        });
+                    samples.clear();
+                    samples.extend(p.decoder.by_ref().take(PCM_SAMPLES));
                     if samples.is_empty() {
+                        spare = Some(samples);
                         stats2.done.store(true, Ordering::Release);
                         loop {
                             if stats2.cancel.load(Ordering::Relaxed) {
@@ -693,7 +726,8 @@ impl Audio {
                                 stats2.done.store(false, Ordering::Release);
                                 continue 'decode;
                             }
-                            std::thread::sleep(Duration::from_millis(5));
+                            stats2.decoder_waits.fetch_add(1, Ordering::Relaxed);
+                            std::thread::park();
                         }
                     }
                     let mut packet = Packet { samples, epoch };
@@ -707,18 +741,23 @@ impl Audio {
                                     break 'decode;
                                 }
                                 if stats2.epoch.load(Ordering::Acquire) != epoch {
+                                    spare = Some(packet.samples);
                                     continue 'decode;
                                 }
-                                std::thread::sleep(Duration::from_millis(2));
+                                stats2.decoder_waits.fetch_add(1, Ordering::Relaxed);
+                                std::thread::park();
                             }
                         }
                     }
                 }
                 stats2.done.store(true, Ordering::Release);
             })?;
+        let decoder_thread = decoder.thread().clone();
         // Start after a bounded pre-roll. The audio callback never waits on a network read.
         let source = PcmSource {
             rx,
+            recycle: recycle_tx,
+            decoder_thread: decoder_thread.clone(),
             buffer: Vec::new(),
             pos: 0,
             epoch: 0,
@@ -734,6 +773,7 @@ impl Audio {
         sink.append(source);
         Ok(Self {
             _stream: stream,
+            decoder_thread,
             sink,
             stats,
             format: p.format,
@@ -753,11 +793,13 @@ impl Audio {
             .store((seconds.max(0.0) * 1000.0) as u64, Ordering::Release);
         self.stats.done.store(false, Ordering::Release);
         self.stats.epoch.fetch_add(1, Ordering::AcqRel);
+        self.decoder_thread.unpark();
     }
 }
 impl Drop for Audio {
     fn drop(&mut self) {
         self.stats.cancel.store(true, Ordering::Relaxed);
+        self.decoder_thread.unpark();
         self.sink.stop();
     }
 }
@@ -793,6 +835,91 @@ pub fn save_download(plan: StreamPlan, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pcm_recycles_consumed_and_stale_packets_without_changing_samples_or_clocks() {
+        let (tx, rx) = mpsc::sync_channel(4);
+        let (recycle, reused) = mpsc::sync_channel(4);
+        let stats = Arc::new(AudioStats::default());
+        let mut source = PcmSource {
+            rx,
+            recycle,
+            decoder_thread: std::thread::current(),
+            buffer: vec![],
+            pos: 0,
+            epoch: 0,
+            stats: stats.clone(),
+            rate: 44100,
+            channels: 2,
+            duration: None,
+        };
+        tx.send(Packet {
+            samples: vec![1., 2.],
+            epoch: 0,
+        })
+        .unwrap();
+        tx.send(Packet {
+            samples: vec![3., 4.],
+            epoch: 0,
+        })
+        .unwrap();
+        assert_eq!(
+            source.by_ref().take(3).collect::<Vec<_>>(),
+            vec![1., 2., 3.]
+        );
+        assert_eq!(reused.try_recv().unwrap(), vec![1., 2.]);
+        stats.epoch.store(1, Ordering::Release);
+        stats.played_samples.store(100, Ordering::Relaxed);
+        tx.send(Packet {
+            samples: vec![5., 6.],
+            epoch: 0,
+        })
+        .unwrap();
+        tx.send(Packet {
+            samples: vec![7., 8.],
+            epoch: 1,
+        })
+        .unwrap();
+        assert_eq!(source.by_ref().take(2).collect::<Vec<_>>(), vec![7., 8.]);
+        assert_eq!(stats.played_samples.load(Ordering::Relaxed), 102);
+        assert_eq!(stats.consumed_samples.load(Ordering::Relaxed), 5);
+        assert_eq!(stats.underrun_samples.load(Ordering::Relaxed), 0);
+        assert_eq!(reused.try_iter().count(), 2);
+    }
+    #[test]
+    fn consuming_pcm_wakes_the_waiting_producer_and_drop_cancels_it() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (awake_tx, awake_rx) = mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            tx.send(Packet {
+                samples: vec![0.5],
+                epoch: 0,
+            })
+            .unwrap();
+            ready_tx.send(()).unwrap();
+            std::thread::park();
+            awake_tx.send(()).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let stats = Arc::new(AudioStats::default());
+        let mut source = PcmSource {
+            rx,
+            recycle: mpsc::sync_channel(1).0,
+            decoder_thread: producer.thread().clone(),
+            buffer: vec![],
+            pos: 0,
+            epoch: 0,
+            stats: stats.clone(),
+            rate: 44100,
+            channels: 1,
+            duration: None,
+        };
+        assert_eq!(source.next(), Some(0.5));
+        awake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(source);
+        assert!(stats.cancel.load(Ordering::Relaxed));
+        producer.join().unwrap();
+    }
     #[test]
     fn fragmented_flac_plays_and_seeks_before_final_segment_arrives() {
         use std::net::TcpListener;
@@ -974,6 +1101,8 @@ mod tests {
         let stats = Arc::new(AudioStats::default());
         let mut s = PcmSource {
             rx,
+            recycle: mpsc::sync_channel(1).0,
+            decoder_thread: std::thread::current(),
             buffer: vec![],
             pos: 0,
             epoch: 0,
@@ -998,6 +1127,8 @@ mod tests {
         .unwrap();
         let mut source = PcmSource {
             rx,
+            recycle: mpsc::sync_channel(1).0,
+            decoder_thread: std::thread::current(),
             buffer: vec![],
             pos: 0,
             epoch: 0,
@@ -1033,6 +1164,8 @@ mod tests {
         stats.cancel.store(true, Ordering::Relaxed);
         let mut s = PcmSource {
             rx,
+            recycle: mpsc::sync_channel(1).0,
+            decoder_thread: std::thread::current(),
             buffer: vec![],
             pos: 0,
             epoch: 0,

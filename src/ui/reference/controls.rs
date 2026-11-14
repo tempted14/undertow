@@ -348,7 +348,10 @@ impl App {
         self.now_tab = 2;
         self.tab_started = Instant::now();
         let was_manual = std::mem::take(&mut self.lyric_manual_scroll);
-        self.lyric_entry_generation = u64::MAX;
+        self.lyric_entry_generation = self.generation;
+        self.lyric_jump = (self.settings.animated_lyrics && self.lyrics.synced).then(|| {
+            crate::ui::lyric_jump::Jump::new(self.lyric_scroll, self.lyric_position(), false)
+        });
         self.lyric_last_position = None;
         self.lyric_velocity = 0.;
         if !was_manual {

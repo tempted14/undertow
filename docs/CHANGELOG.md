@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-11-13
+
+- Ease lyric line/word clicks and resync over 340 ms, with rapid retargeting, manual-scroll cancellation, reduced-motion support and layout-change cancellation.
+- Recycle bounded PCM packets instead of allocating a fresh vector for each decode batch. Retain the 16-packet queue and 4,096-sample packets; the pool covers producer/consumer buffers as well.
+- Wake the decoder on queue consumption, seeking and cancellation instead of polling full queues every 2 ms or completed streams every 5 ms.
+- Keep audio callbacks free of blocking waits; preserve exact sample counters, stale-seek rejection and download/spool limits. Seek failures now surface as playback errors.
+- Add transition, sample ordering, recycling, wake-up and cancellation regression checks, plus a hidden rapid-seek/resync diagnostic.
+
 ## 0.2.0 — 2026-11-13
 
 - Repaint synchronized lyrics at display rate only during spring motion, fades, scrolling or live word fill. Settled lines sleep until the next timed change; audio and background integrations continue.

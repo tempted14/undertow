@@ -19,6 +19,7 @@ use std::{
 };
 
 mod diagnostics;
+mod lyric_jump;
 mod reference;
 
 const TEXT: Color32 = Color32::from_rgb(240, 243, 245);
@@ -170,6 +171,8 @@ pub struct App {
     lyric_velocity: f32,
     lyric_frame_motion: bool,
     lyric_follow_target: f32,
+    lyric_jump: Option<lyric_jump::Jump>,
+    lyric_jump_trace: Vec<(f64, f64, f32, bool, u64)>,
     animation_clock: Instant,
     playing_playlist: Option<String>,
     startup_started: Option<Instant>,
@@ -722,6 +725,8 @@ impl App {
             lyric_velocity: 0.,
             lyric_frame_motion: false,
             lyric_follow_target: 0.,
+            lyric_jump: None,
+            lyric_jump_trace: Vec::new(),
             animation_clock: Instant::now(),
             playing_playlist: None,
             startup_started: None,
@@ -908,6 +913,18 @@ impl App {
     fn lyric_position(&self) -> f64 {
         (self.position() + self.settings.lyric_offset_ms as f64 / 1000.).max(0.)
     }
+    fn seek_lyric(&mut self, seconds: f64) {
+        if let Some(audio) = &self.audio {
+            audio.seek((seconds - self.settings.lyric_offset_ms as f64 / 1000.).max(0.));
+            self.lyric_jump = self
+                .settings
+                .animated_lyrics
+                .then(|| lyric_jump::Jump::new(self.lyric_scroll, seconds, true));
+            self.lyric_manual_scroll = false;
+            self.lyric_velocity = 0.;
+            self.lyric_entry_generation = self.generation;
+        }
+    }
     fn schedule_settings_save(&mut self) {
         self.settings_dirty = true;
         self.settings_changed_at = Instant::now();
@@ -962,6 +979,7 @@ impl App {
             }
         }
         self.lyric_scroll = 0.0;
+        self.lyric_jump = None;
         self.lyric_manual_scroll = false;
         self.lyric_velocity = 0.;
         self.startup_started = Some(Instant::now());
@@ -1840,6 +1858,12 @@ impl App {
         details["lyrics_ui_hidden"] =
             serde_json::json!(self.page == Page::Lyrics && self.lyrics_chrome_hidden);
         details["lyric_request_pending"] = serde_json::json!(self.lyric_request.pending);
+        details["pcm_packet_allocations"] =
+            serde_json::json!(a.map(|a| a.stats.pcm_allocations.load(Ordering::Relaxed)));
+        details["decoder_waits"] =
+            serde_json::json!(a.map(|a| a.stats.decoder_waits.load(Ordering::Relaxed)));
+        details["lyric_jump_trace"] = serde_json::json!(self.lyric_jump_trace);
+        details["lyric_jump_active"] = serde_json::json!(self.lyric_jump.is_some());
         details["ui_frames"] = serde_json::json!(self.frame);
         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);

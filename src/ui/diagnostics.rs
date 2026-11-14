@@ -175,9 +175,51 @@ impl App {
         if self.benchmark.is_none()
             || !*ENABLED.get_or_init(|| {
                 std::env::args().any(|a| a == "--background-benchmark")
-                    && std::env::args().any(|a| a == "--preview-lyric-navigation")
+                    && std::env::args()
+                        .any(|a| a == "--preview-lyric-navigation" || a == "--preview-lyric-clicks")
             })
         {
+            return;
+        }
+        static CLICKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CLICKS.get_or_init(|| std::env::args().any(|a| a == "--preview-lyric-clicks")) {
+            let time = self.metrics.elapsed();
+            let id = Id::new("lyric-click-preview-step");
+            let step = ctx.data_mut(|d| *d.get_temp_mut_or_default::<u8>(id));
+            let action = match step {
+                0 if time > 2.2 => Some(20.),
+                1 if time > 4.0 => Some(8.),
+                2 if time > 5.0 => Some(22.),
+                _ => None,
+            };
+            if let Some(seconds) = action {
+                self.seek_lyric(seconds);
+                ctx.data_mut(|d| d.insert_temp(id, step + 1));
+            } else if step == 3 && time > 6.5 {
+                self.lyric_manual_scroll = true;
+                self.lyric_jump = None;
+                self.lyric_scroll = 500.;
+                ctx.data_mut(|d| d.insert_temp(id, 4_u8));
+            } else if step == 4 && time > 7.0 {
+                self.resync_lyric_view();
+                ctx.data_mut(|d| d.insert_temp(id, 5_u8));
+            }
+            if self.lyric_jump_trace.len() < 512
+                && self
+                    .lyric_jump_trace
+                    .last()
+                    .is_none_or(|r| time - r.0 > 0.02)
+            {
+                self.lyric_jump_trace.push((
+                    time,
+                    self.lyric_position(),
+                    self.lyric_scroll,
+                    self.lyric_jump.is_some(),
+                    self.audio
+                        .as_ref()
+                        .map_or(0, |a| a.stats.underrun_samples.load(Ordering::Relaxed)),
+                ));
+            }
             return;
         }
         let id = Id::new("lyric-navigation-preview-step");

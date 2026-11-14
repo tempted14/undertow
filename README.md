@@ -32,7 +32,7 @@ Release builds remap local compiler paths; packaging verifies the executable con
 
 ## Performance and UI verification
 
-Version 0.2.0 uses demand-driven lyric repainting, immutable file-backed system fonts and redacted diagnostics. See the [matched CPU/GPU/RAM measurements and credential audit](docs/PERFORMANCE-0.2.0.md).
+Version 0.2.1 adds eased lyric taps/resync, bounded PCM buffer recycling and wake-driven decoder waiting. See the [matched measurements and validation limits](docs/PERFORMANCE-0.2.1.md). Demand-driven lyric repainting, immutable file-backed system fonts and diagnostic redaction from [0.2.0](docs/PERFORMANCE-0.2.0.md) remain in place.
 
 The audio conversion hot path reuses its sample storage, library reads run separately from playback/edit requests, and album metadata uses a bounded recent-item cache. Results and limitations are recorded in [the audit](docs/VALIDATION.md) and [performance measurements](docs/PERFORMANCE.md).
 

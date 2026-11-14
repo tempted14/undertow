@@ -1,6 +1,6 @@
 # Current release validation
 
-For 0.2.0, see [the performance/credential audit](PERFORMANCE-0.2.0.md). It records 104 passing Rust app tests, five renderer tests, three Python privacy tests and the exact final-binary comparisons. Existing live-integration limits remain below. Final hidden UI captures cover Home, Tracks, Lyrics, General settings, Create playlist and Queue.
+For 0.2.1, see [lyric navigation and playback measurements](PERFORMANCE-0.2.1.md). 107 Rust app tests, five renderer tests and three Python privacy tests pass. Four matched steady playback workloads have zero underruns; a separate rapid-seek trace records brief queue-reset silence explicitly. Lyrics, Tracks and General settings captures were reviewed. Existing live-integration limits remain below. The [0.2.0 performance/credential audit](PERFORMANCE-0.2.0.md) and broader UI review remain available.
 
 ---
 

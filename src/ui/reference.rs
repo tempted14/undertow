@@ -1299,6 +1299,7 @@ impl App {
         );
         let idle_color = Color32::from_white_alpha(155);
         let unlit_color = Color32::from_white_alpha(125);
+        let mut seek_request = None;
         at(ui, lyrics_rect, "lyrics-lines", |ui| {
             if data.lines.is_empty() {
                 ui.add_space(lyrics_rect.height() * 0.25);
@@ -1323,7 +1324,11 @@ impl App {
                 data.lines.len(),
                 ui.ctx().pixels_per_point().to_bits(),
             );
+            if !self.settings.animated_lyrics {
+                self.lyric_jump = None;
+            }
             if self.lyric_layout_key != Some(key) {
+                self.lyric_jump = None;
                 self.lyric_offsets.clear();
                 self.lyric_galleys.clear();
                 self.lyric_offsets.push(0.);
@@ -1355,6 +1360,7 @@ impl App {
                 &mut self.lyric_scroll,
             ) {
                 self.lyric_manual_scroll = true;
+                self.lyric_jump = None;
                 self.ui_motion_until = Instant::now() + Duration::from_millis(220);
             }
             if data.synced && !self.lyric_manual_scroll {
@@ -1371,18 +1377,46 @@ impl App {
                 let seeked = self
                     .lyric_last_position
                     .is_some_and(|last| position < last - 0.12 || position - last > 0.75);
-                if seeked || self.lyric_entry_generation != self.generation {
+                if (seeked && self.lyric_jump.is_none())
+                    || self.lyric_entry_generation != self.generation
+                {
                     self.lyric_scroll = target;
                     self.lyric_velocity = 0.;
                     self.lyric_entry_generation = self.generation;
                 }
                 self.lyric_last_position = Some(position);
-                crate::lyrics::follow_scroll(
-                    &mut self.lyric_scroll,
-                    &mut self.lyric_velocity,
-                    target,
-                    dt * self.settings.motion_speed,
-                );
+                if let Some(jump) = &mut self.lyric_jump {
+                    if jump.awaiting_audio
+                        && ((position - jump.requested).abs() < 0.35
+                            || jump.started.elapsed().as_secs_f32() > 0.6)
+                    {
+                        jump.awaiting_audio = false;
+                        jump.from = self.lyric_scroll;
+                        jump.started = Instant::now();
+                    }
+                    if !jump.awaiting_audio {
+                        let (scroll, moving) = crate::ui::lyric_jump::Jump::sample(
+                            jump.from,
+                            target,
+                            jump.started.elapsed().as_secs_f32(),
+                            self.settings.motion_speed,
+                        );
+                        self.lyric_scroll = scroll;
+                        self.lyric_frame_motion = moving;
+                        if !moving {
+                            self.lyric_jump = None;
+                        }
+                    } else {
+                        self.lyric_frame_motion = true;
+                    }
+                } else {
+                    crate::lyrics::follow_scroll(
+                        &mut self.lyric_scroll,
+                        &mut self.lyric_velocity,
+                        target,
+                        dt * self.settings.motion_speed,
+                    );
+                }
                 if !self.settings.animated_lyrics {
                     self.lyric_scroll = target;
                     self.lyric_velocity = 0.;
@@ -1521,14 +1555,10 @@ impl App {
                                         )
                                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .clicked()
-                                        && let Some(a) = &self.audio
+                                        && self.audio.is_some()
                                     {
                                         word_seeked = true;
-                                        a.seek(
-                                            (word.start
-                                                - self.settings.lyric_offset_ms as f64 / 1000.)
-                                                .max(0.),
-                                        );
+                                        seek_request = Some(word.start);
                                     }
                                 }
                             }
@@ -1581,14 +1611,9 @@ impl App {
                                             self.settings.lyric_glow.then_some(glow_color),
                                         );
                                     }
-                                    if b.clicked()
-                                        && let Some(a) = &self.audio
-                                    {
-                                        a.seek(
-                                            (word.start
-                                                - self.settings.lyric_offset_ms as f64 / 1000.)
-                                                .max(0.),
-                                        );
+                                    if b.clicked() && self.audio.is_some() {
+                                        word_seeked = true;
+                                        seek_request = Some(word.start);
                                     }
                                 }
                             })
@@ -1625,14 +1650,9 @@ impl App {
                                 ui.close();
                             }
                         });
-                        if response.clicked()
-                            && !word_seeked
-                            && data.synced
-                            && let Some(a) = &self.audio
+                        if response.clicked() && !word_seeked && data.synced && self.audio.is_some()
                         {
-                            a.seek(
-                                (line.start - self.settings.lyric_offset_ms as f64 / 1000.).max(0.),
-                            );
+                            seek_request = Some(line.start);
                         }
                         if self.translated {
                             let second = if self.settings.romanize {
@@ -1648,6 +1668,9 @@ impl App {
                 }
             }
         });
+        if let Some(seconds) = seek_request {
+            self.seek_lyric(seconds);
+        }
     }
 }
 

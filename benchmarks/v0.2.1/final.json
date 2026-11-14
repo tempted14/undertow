@@ -1,0 +1,58 @@
+{
+  "sha256": "e956c3a1f382bb48cb03436f217e0b7544ef05bd1d0d17b06416b7dcbcfd2357",
+  "results": [
+    {
+      "name": "tracks",
+      "renderer": "software",
+      "working_set_bytes": 53248000,
+      "private_bytes": 39108608,
+      "cpu_percent_one_core": 2.348671578058356,
+      "ui_frames": 138,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.993696145124716,
+      "duration_seconds": 18.044031,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196
+    },
+    {
+      "name": "line-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 65536000,
+      "private_bytes": 50814976,
+      "cpu_percent_one_core": 6.327818085220027,
+      "ui_frames": 247,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.99170068027211,
+      "duration_seconds": 18.0378464,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196
+    },
+    {
+      "name": "word-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 69345280,
+      "private_bytes": 54300672,
+      "cpu_percent_one_core": 20.433324225336357,
+      "ui_frames": 2756,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.96172335600907,
+      "duration_seconds": 18.0018666,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196
+    },
+    {
+      "name": "gpu-line-lyrics",
+      "renderer": "OpenGL",
+      "working_set_bytes": 118509568,
+      "private_bytes": 219172864,
+      "cpu_percent_one_core": 2.217561175920477,
+      "ui_frames": 238,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 18.00968253968254,
+      "duration_seconds": 18.0348466,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196
+    }
+  ],
+  "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+}
