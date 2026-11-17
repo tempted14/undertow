@@ -1,6 +1,6 @@
 # Current release validation
 
-For 0.2.1, see [lyric navigation and playback measurements](PERFORMANCE-0.2.1.md). 107 Rust app tests, five renderer tests and three Python privacy tests pass. Four matched steady playback workloads have zero underruns; a separate rapid-seek trace records brief queue-reset silence explicitly. Lyrics, Tracks and General settings captures were reviewed. Existing live-integration limits remain below. The [0.2.0 performance/credential audit](PERFORMANCE-0.2.0.md) and broader UI review remain available.
+For 0.2.2, see [playback overhead and resource lifecycle](PERFORMANCE-0.2.2.md) and [the credential review](SECURITY-0.2.2.md). 114 app tests, five renderer tests and three privacy tests pass. Six steady workloads report zero underruns; exact sample/pixel comparisons, cancellation cleanup, credential redirects, navigation, collapsed viewport and EOF checks pass. Unfavorable benchmark readings and repeated comparisons are retained. Existing live-account limitations remain below.
 
 ---
 

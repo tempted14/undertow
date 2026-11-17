@@ -1,0 +1,367 @@
+{
+  "before022-historical": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 53288960,
+        "private_bytes": 38678528,
+        "cpu_percent_one_core": 2.8022921248275683,
+        "ui_frames": 134,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99968253968254,
+        "duration_seconds": 18.0385427
+      },
+      {
+        "name": "line-lyrics",
+        "renderer": "software",
+        "working_set_bytes": 65486848,
+        "private_bytes": 50454528,
+        "cpu_percent_one_core": 6.940453837720062,
+        "ui_frames": 238,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99968253968254,
+        "duration_seconds": 18.0228279
+      },
+      {
+        "name": "word-lyrics",
+        "renderer": "software",
+        "working_set_bytes": 64352256,
+        "private_bytes": 49479680,
+        "cpu_percent_one_core": 24.093412417946013,
+        "ui_frames": 2756,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.969727891156463,
+        "duration_seconds": 18.006166
+      },
+      {
+        "name": "gpu-line-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 118763520,
+        "private_bytes": 218959872,
+        "cpu_percent_one_core": 2.7424491662311916,
+        "ui_frames": 277,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9797052154195,
+        "duration_seconds": 18.0365606
+      },
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 121647104,
+        "private_bytes": 218918912,
+        "cpu_percent_one_core": 16.86545444976009,
+        "ui_frames": 2946,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.96172335600907,
+        "duration_seconds": 18.0156476
+      },
+      {
+        "name": "high-rate-tracks",
+        "renderer": "software",
+        "working_set_bytes": 56532992,
+        "private_bytes": 39272448,
+        "cpu_percent_one_core": 5.58719373517265,
+        "ui_frames": 150,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 18.01265625,
+        "duration_seconds": 18.035249
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "final022-historical": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 53137408,
+        "private_bytes": 38785024,
+        "cpu_percent_one_core": 3.7966896060193855,
+        "ui_frames": 133,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9897052154195,
+        "duration_seconds": 18.0282157
+      },
+      {
+        "name": "line-lyrics",
+        "renderer": "software",
+        "working_set_bytes": 65429504,
+        "private_bytes": 52350976,
+        "cpu_percent_one_core": 6.597107909002399,
+        "ui_frames": 239,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9897052154195,
+        "duration_seconds": 18.0154196
+      },
+      {
+        "name": "word-lyrics",
+        "renderer": "software",
+        "working_set_bytes": 64507904,
+        "private_bytes": 49455104,
+        "cpu_percent_one_core": 20.87804764040525,
+        "ui_frames": 2768,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.969727891156463,
+        "duration_seconds": 18.003213
+      },
+      {
+        "name": "gpu-line-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 118849536,
+        "private_bytes": 219430912,
+        "cpu_percent_one_core": 2.2176504103330266,
+        "ui_frames": 278,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9897052154195,
+        "duration_seconds": 18.021089
+      },
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 121831424,
+        "private_bytes": 219144192,
+        "cpu_percent_one_core": 19.13439374734799,
+        "ui_frames": 2937,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.98172335600907,
+        "duration_seconds": 18.0169589
+      },
+      {
+        "name": "high-rate-tracks",
+        "renderer": "software",
+        "working_set_bytes": 56492032,
+        "private_bytes": 38912000,
+        "cpu_percent_one_core": 3.2608108517188095,
+        "ui_frames": 153,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 18.02465625,
+        "duration_seconds": 18.0436324
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "tracks-old-a": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 52707328,
+        "private_bytes": 38043648,
+        "cpu_percent_one_core": 3.6171720526406754,
+        "ui_frames": 135,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99968253968254,
+        "duration_seconds": 18.0298126
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "tracks-new-a": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 53137408,
+        "private_bytes": 38084608,
+        "cpu_percent_one_core": 2.738366973117631,
+        "ui_frames": 137,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99170068027211,
+        "duration_seconds": 18.0512058
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "tracks-new-b": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 53362688,
+        "private_bytes": 38756352,
+        "cpu_percent_one_core": 3.072035541216216,
+        "ui_frames": 137,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99170068027211,
+        "duration_seconds": 18.0323483
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "tracks-old-b": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "tracks",
+        "renderer": "software",
+        "working_set_bytes": 53362688,
+        "private_bytes": 38608896,
+        "cpu_percent_one_core": 2.8037819204964083,
+        "ui_frames": 136,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.99968253968254,
+        "duration_seconds": 18.0264629
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpuwords-old-a": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 127991808,
+        "private_bytes": 243003392,
+        "cpu_percent_one_core": 16.193357669562687,
+        "ui_frames": 2842,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.969727891156463,
+        "duration_seconds": 18.014894
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpuwords-new-a": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 127938560,
+        "private_bytes": 242974720,
+        "cpu_percent_one_core": 16.672047255409034,
+        "ui_frames": 2846,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9797052154195,
+        "duration_seconds": 18.016343
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpuwords-new-b": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 121667584,
+        "private_bytes": 218931200,
+        "cpu_percent_one_core": 18.15425172575417,
+        "ui_frames": 2933,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.931768707482995,
+        "duration_seconds": 18.0142906
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpuwords-old-b": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 121851904,
+        "private_bytes": 218886144,
+        "cpu_percent_one_core": 19.44145694871155,
+        "ui_frames": 2950,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.959750566893423,
+        "duration_seconds": 18.0163383
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "highrate-new-confirm": {
+    "sha256": "ff691cd0d171cd0d144a948c58b86eb18d6aad9e1bbbab7f0052e2f88b52de3d",
+    "results": [
+      {
+        "name": "high-rate-tracks",
+        "renderer": "software",
+        "working_set_bytes": 56668160,
+        "private_bytes": 39489536,
+        "cpu_percent_one_core": 5.252663732280926,
+        "ui_frames": 153,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 18.03265625,
+        "duration_seconds": 18.0470656
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "highrate-old-confirm": {
+    "sha256": "5f3309eaaaf048093449ec47bfa8a707ec3de4ee716533ed118b5c7aa827827d",
+    "results": [
+      {
+        "name": "high-rate-tracks",
+        "renderer": "software",
+        "working_set_bytes": 57442304,
+        "private_bytes": 40718336,
+        "cpu_percent_one_core": 5.477394756640351,
+        "ui_frames": 155,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 18.18265625,
+        "duration_seconds": 18.1915023
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpu-word-fixed-a": {
+    "sha256": "19f8c1545d9147dc510a90e1d44450a86fb4dec0e9bbc3e9e6781c6c6b9ad3b3",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 128073728,
+        "private_bytes": 242896896,
+        "cpu_percent_one_core": 14.114977009818746,
+        "ui_frames": 2969,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.969727891156463,
+        "duration_seconds": 18.0127236
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpu-word-fixed-b": {
+    "sha256": "19f8c1545d9147dc510a90e1d44450a86fb4dec0e9bbc3e9e6781c6c6b9ad3b3",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 122011648,
+        "private_bytes": 219365376,
+        "cpu_percent_one_core": 14.78132354966256,
+        "ui_frames": 2967,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9797052154195,
+        "duration_seconds": 18.0143134
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  },
+  "gpu-word-fixed-c": {
+    "sha256": "19f8c1545d9147dc510a90e1d44450a86fb4dec0e9bbc3e9e6781c6c6b9ad3b3",
+    "results": [
+      {
+        "name": "gpu-word-lyrics",
+        "renderer": "OpenGL",
+        "working_set_bytes": 128106496,
+        "private_bytes": 242974720,
+        "cpu_percent_one_core": 16.681015223802795,
+        "ui_frames": 2984,
+        "underrun_samples": 0,
+        "consumed_audio_seconds": 17.9897052154195,
+        "duration_seconds": 18.0171444
+      }
+    ],
+    "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+  }
+}

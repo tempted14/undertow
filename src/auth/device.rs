@@ -150,12 +150,13 @@ pub(super) fn login(
     show: impl Fn(DevicePrompt),
     opener: impl Fn(&str) -> Result<()>,
 ) -> Result<Session> {
-    let client = http()?;
+    let client = credential_http()?;
     login_status("requesting_device_code");
-    let response = client
-        .post(DEVICE_ENDPOINT)
-        .form(&[("client_id", DEVICE_CLIENT_ID), ("scope", SCOPE)])
-        .send()?;
+    let response = credential_send(
+        client
+            .post(DEVICE_ENDPOINT)
+            .form(&[("client_id", DEVICE_CLIENT_ID), ("scope", SCOPE)]),
+    )?;
     let status = response.status().as_u16();
     ensure!(
         (200..300).contains(&status),
@@ -175,16 +176,12 @@ pub(super) fn login(
     let mut failures = 0;
     loop {
         wait_until(Instant::now() + Duration::from_secs(interval), deadline)?;
-        let response = match client
-            .post(TOKEN_URL)
-            .form(&[
-                ("client_id", DEVICE_CLIENT_ID),
-                ("device_code", grant.device_code.as_str()),
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-                ("scope", SCOPE),
-            ])
-            .send()
-        {
+        let response = match credential_send(client.post(TOKEN_URL).form(&[
+            ("client_id", DEVICE_CLIENT_ID),
+            ("device_code", grant.device_code.as_str()),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ("scope", SCOPE),
+        ])) {
             Ok(r) => r,
             Err(_) => {
                 failures += 1;

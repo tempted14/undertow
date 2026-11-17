@@ -1,0 +1,12 @@
+{
+  "candidate_sha256": "228acf8f6f398e6e2fbed09c2cd270a44f0ea836a678f1eb4f29ad2c4520d73b",
+  "observed_exit_code": 3221226505,
+  "cause": "Rust f32 clamp bounds assertion when a transient lyric viewport had height -304 and the scrollbar minimum was 24",
+  "fixed_executable_sha256": "19f8c1545d9147dc510a90e1d44450a86fb4dec0e9bbc3e9e6781c6c6b9ad3b3",
+  "regression_tests": [
+    "collapsed_tiny_and_invalid_viewports_keep_navigation_safe",
+    "seek_preview_handles_collapsed_player_bounds"
+  ],
+  "additional_gpu_word_runs_passed": 3,
+  "raw_crash_reports_or_account_data_included": false
+}

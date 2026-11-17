@@ -1,0 +1,9 @@
+{
+  "played_seconds": 27.85750566893424,
+  "consumed_audio_seconds": 11.023673469387756,
+  "pcm_packet_allocations": 18,
+  "underrun_samples": 663,
+  "lyric_jump_active": false,
+  "lyric_manual_scroll": false,
+  "scope": "11-second invisible local mono 44.1 kHz run, seeks to 20s, 8s and 22s, manual reading then resync; no account data."
+}

@@ -931,10 +931,7 @@ impl App {
                         );
                         let text = clock(time);
                         let bubble = Rect::from_center_size(
-                            pos2(
-                                pointer.x.clamp(r.left() + 30., r.right() - 30.),
-                                progress.top() - 25.,
-                            ),
+                            pos2(layout::seek_preview_x(r, pointer.x), progress.top() - 25.),
                             vec2(54., 30.),
                         );
                         let preview = ui.ctx().layer_painter(egui::LayerId::new(
@@ -1331,6 +1328,7 @@ impl App {
                 self.lyric_jump = None;
                 self.lyric_offsets.clear();
                 self.lyric_galleys.clear();
+                self.lyric_word_galleys = None;
                 self.lyric_offsets.push(0.);
                 for line in &data.lines {
                     let size = crate::lyric_fonts::measure(
@@ -1564,9 +1562,33 @@ impl App {
                             }
                             response
                         } else if active_line && !line.words.is_empty() {
+                            // Only the active line needs individual word layouts.
+                            // Reuse their immutable shapes for both paint passes;
+                            // color and fill clipping do not affect font geometry.
+                            if self
+                                .lyric_word_galleys
+                                .as_ref()
+                                .is_none_or(|(index, _)| *index != i)
+                            {
+                                self.lyric_word_galleys = Some((
+                                    i,
+                                    line.words
+                                        .iter()
+                                        .map(|word| {
+                                            crate::lyric_fonts::layout(
+                                                ui.ctx(),
+                                                &word.text,
+                                                font(size, true),
+                                                f32::INFINITY,
+                                            )
+                                        })
+                                        .collect(),
+                                ));
+                            }
+                            let word_galleys = &self.lyric_word_galleys.as_ref().unwrap().1;
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.;
-                                for word in &line.words {
+                                for (word, galley) in line.words.iter().zip(word_galleys) {
                                     let fraction = if self.settings.animated_lyrics {
                                         ((position - word.start)
                                             / (word.end - word.start).max(0.06))
@@ -1577,15 +1599,8 @@ impl App {
                                     } else {
                                         0.
                                     };
-                                    let b = lyric_text(
-                                        ui,
-                                        &word.text,
-                                        size,
-                                        unlit_color,
-                                        None,
-                                        false,
-                                        None,
-                                    );
+                                    let b =
+                                        lyric_galley(ui, galley.clone(), unlit_color, None, None);
                                     if fraction > 0. {
                                         let clip = Rect::from_min_max(
                                             b.rect.min - vec2(6., 7.),
@@ -1597,16 +1612,10 @@ impl App {
                                         let painter = ui
                                             .painter()
                                             .with_clip_rect(ui.clip_rect().intersect(clip));
-                                        let galley = crate::lyric_fonts::layout(
-                                            ui.ctx(),
-                                            &word.text,
-                                            font(size, true),
-                                            f32::INFINITY,
-                                        );
                                         paint_lyric_galley(
                                             &painter,
                                             b.rect.min,
-                                            galley,
+                                            galley.clone(),
                                             color,
                                             self.settings.lyric_glow.then_some(glow_color),
                                         );

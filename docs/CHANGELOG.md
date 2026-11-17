@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 — 2026-11-17
+
+- Copy decoded PCM spans into the bounded packet pool and preserve exact per-sample clocks with one fewer locked counter update.
+- Reuse the last active word-line layouts for base/highlight rendering; retain existing glow, wrapping, shaping and click targets.
+- Wake stalled spool readers on cancellation; cancel unused prepared streams and release spool ownership without a strong cycle. Existing HTTP timeouts still apply to in-flight blocking reads.
+- Add exact-output, pixel/hit-target and cancellation-lifecycle tests, plus high-rate and GPU word-lyric comparisons with repeat measurements.
+- Reject redirects on credential-bearing token/device-code exchanges and the optional broker's upstream request. Omit private broker URL parameters from transport errors.
+- Fix collapsed lyric-scrollbar and progress-tooltip bounds during transient window sizes; preserve the reading position until the viewport returns.
+
 ## 0.2.1 — 2026-11-14
 
 - Ease lyric line/word clicks and resync over 340 ms, with rapid retargeting, manual-scroll cancellation, reduced-motion support and layout-change cancellation.

@@ -2,8 +2,22 @@ use super::*;
 
 /// Only navigates the lyric viewport: never seeks audio or changes timestamps.
 pub(super) fn scroll(ui: &mut egui::Ui, rect: Rect, content_height: f32, offset: &mut f32) -> bool {
+    // Native startup, resize and shutdown can briefly expose a collapsed viewport.
+    // Keep the reading position without constructing an invalid scrollbar.
+    if !rect.is_finite()
+        || rect.width() <= 0.
+        || rect.height() <= 0.
+        || !content_height.is_finite()
+        || content_height <= 0.
+    {
+        return false;
+    }
     let limit = (content_height - rect.height()).max(0.);
-    *offset = offset.clamp(0., limit);
+    *offset = if offset.is_finite() {
+        offset.clamp(0., limit)
+    } else {
+        0.
+    };
     if limit <= 0. {
         return false;
     }
@@ -20,7 +34,8 @@ pub(super) fn scroll(ui: &mut egui::Ui, rect: Rect, content_height: f32, offset:
         }
     }
     let rail = Rect::from_min_max(rect.right_top() - vec2(10., 0.), rect.right_bottom());
-    let thumb_height = (rail.height() * rail.height() / content_height).clamp(24., rail.height());
+    let thumb_height = (rail.height() * rail.height() / content_height)
+        .clamp(24f32.min(rail.height()), rail.height());
     let response = ui
         .interact(rail, Id::new("lyric-scrollbar"), Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -58,6 +73,42 @@ pub(super) fn scroll(ui: &mut egui::Ui, rect: Rect, content_height: f32, offset:
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn collapsed_tiny_and_invalid_viewports_keep_navigation_safe() {
+        for height in [-304., 0., 1., 10., 23., 24., 300.] {
+            let ctx = egui::Context::default();
+            let mut offset = 90.;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    assert!(!scroll(
+                        ui,
+                        Rect::from_min_size(pos2(300., 100.), vec2(300., height)),
+                        1200.,
+                        &mut offset
+                    ));
+                });
+            });
+            assert_eq!(
+                offset, 90.,
+                "Transient viewports must retain the reading position"
+            );
+        }
+        for content in [0., f32::NAN, f32::INFINITY] {
+            let ctx = egui::Context::default();
+            let mut offset = 90.;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    assert!(!scroll(
+                        ui,
+                        Rect::from_min_size(Pos2::ZERO, vec2(300., 300.)),
+                        content,
+                        &mut offset
+                    ));
+                });
+            });
+            assert_eq!(offset, 90.);
+        }
+    }
     #[test]
     fn wheel_and_scrollbar_navigate_only_inside_the_lyric_viewport() {
         let rect = Rect::from_min_size(pos2(300., 100.), vec2(300., 300.));

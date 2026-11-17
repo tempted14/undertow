@@ -24,6 +24,7 @@ fn main() -> Result<()> {
     );
     let server = Server::http(&bind).map_err(|_| anyhow::anyhow!("Cannot bind token broker"))?;
     let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(20))
         .connect_timeout(Duration::from_secs(8))
         .build()?;

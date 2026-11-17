@@ -165,6 +165,7 @@ pub struct App {
     shuffle_on: bool,
     lyric_offsets: Vec<f32>,
     lyric_galleys: HashMap<usize, crate::lyric_fonts::Layout>,
+    lyric_word_galleys: Option<(usize, Vec<crate::lyric_fonts::Layout>)>,
     lyric_layout_key: Option<(u64, u32, u32, bool, usize, u32)>,
     lyric_scroll: f32,
     lyric_manual_scroll: bool,
@@ -471,6 +472,7 @@ struct LyricBlur {
     radius: f32,
     trail: f32,
 }
+#[cfg(test)]
 fn lyric_text(
     ui: &mut egui::Ui,
     text: &str,
@@ -719,6 +721,7 @@ impl App {
             shuffle_on: false,
             lyric_offsets: Vec::new(),
             lyric_galleys: HashMap::new(),
+            lyric_word_galleys: None,
             lyric_layout_key: None,
             lyric_scroll: 0.0,
             lyric_manual_scroll: false,
@@ -980,6 +983,7 @@ impl App {
             }
         }
         self.lyric_scroll = 0.0;
+        self.lyric_word_galleys = None;
         self.lyric_jump = None;
         self.lyric_manual_scroll = false;
         self.lyric_velocity = 0.;
@@ -1867,6 +1871,11 @@ impl App {
         details["lyric_jump_active"] = serde_json::json!(self.lyric_jump.is_some());
         details["ui_frames"] = serde_json::json!(self.frame);
         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
+        details["retained_lyric_word_layouts"] = serde_json::json!(
+            self.lyric_word_galleys
+                .as_ref()
+                .map_or(0, |(_, words)| words.len())
+        );
         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);
         details["lyric_scroll_offset"] = serde_json::json!(self.lyric_scroll);
         if let Page::Artist(id) = self.page {
@@ -2519,6 +2528,113 @@ pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {
 
 #[cfg(test)]
 mod performance_tests {
+    #[test]
+    fn retained_word_layouts_preserve_wrap_clip_glow_and_hit_rectangles() {
+        use eframe::egui::*;
+        use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
+        let render = |cached: bool, width: usize, fraction: f32| {
+            let ctx = Context::default();
+            assert!(super::load_font(&ctx, ""));
+            let mut rects = Vec::new();
+            let output = ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width as f32, 240.))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    CentralPanel::default().show(ctx, |ui| {
+                        let words = ["Flowing ", "lyrics ", "日本語 ", "stay ", "responsive"];
+                        let layouts: Vec<_> = if cached {
+                            words
+                                .iter()
+                                .map(|text| {
+                                    crate::lyric_fonts::layout(
+                                        ctx,
+                                        text,
+                                        FontId::new(38., FontFamily::Name("Bold".into())),
+                                        f32::INFINITY,
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            vec![]
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.;
+                            for (i, text) in words.iter().enumerate() {
+                                let word = if cached {
+                                    super::lyric_galley(
+                                        ui,
+                                        layouts[i].clone(),
+                                        Color32::from_white_alpha(125),
+                                        None,
+                                        None,
+                                    )
+                                } else {
+                                    super::lyric_text(
+                                        ui,
+                                        text,
+                                        38.,
+                                        Color32::from_white_alpha(125),
+                                        None,
+                                        false,
+                                        None,
+                                    )
+                                };
+                                rects.push(word.rect);
+                                let clip = Rect::from_min_max(
+                                    word.rect.min - vec2(6., 7.),
+                                    pos2(
+                                        word.rect.left() + word.rect.width() * fraction,
+                                        word.rect.bottom() + 7.,
+                                    ),
+                                );
+                                let painter =
+                                    ui.painter().with_clip_rect(ui.clip_rect().intersect(clip));
+                                let layout = if cached {
+                                    layouts[i].clone()
+                                } else {
+                                    crate::lyric_fonts::layout(
+                                        ctx,
+                                        text,
+                                        FontId::new(38., FontFamily::Name("Bold".into())),
+                                        f32::INFINITY,
+                                    )
+                                };
+                                if fraction > 0. {
+                                    super::paint_lyric_galley(
+                                        &painter,
+                                        word.rect.min,
+                                        layout,
+                                        Color32::WHITE,
+                                        Some(Color32::from_white_alpha(110)),
+                                    );
+                                }
+                            }
+                        });
+                    });
+                },
+            );
+            let jobs = ctx.tessellate(output.shapes, output.pixels_per_point);
+            let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
+            let mut pixels = vec![[0; 4]; width * 240];
+            renderer.render(
+                &mut BufferMutRef::new(&mut pixels, width, 240),
+                &jobs,
+                &output.textures_delta,
+                1.,
+            );
+            (rects, pixels)
+        };
+        for width in [300, 640] {
+            for fraction in [0., 0.35, 1.] {
+                assert_eq!(
+                    render(true, width, fraction),
+                    render(false, width, fraction)
+                );
+            }
+        }
+    }
     #[test]
     fn retained_white_glyphs_preserve_the_current_text_color_pixel_for_pixel() {
         use eframe::egui::*;

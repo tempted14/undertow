@@ -1,0 +1,12 @@
+{
+  "date": "2026-11-17",
+  "known_dependency_vulnerabilities": 0,
+  "informational_warning_classes": [
+    "unmaintained"
+  ],
+  "auth_redirect_regressions_passed": true,
+  "private_url_error_regression_passed": true,
+  "automated_checks_passed": 122,
+  "known_confidential_secret_values_available_for_exact_match": 0,
+  "source_and_binary_privacy_checks_passed": true
+}

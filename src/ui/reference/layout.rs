@@ -78,6 +78,17 @@ pub(in crate::ui) fn ease(t: f32) -> f32 {
     t * t * t * (t * (t * 6. - 15.) + 10.)
 }
 
+pub(super) fn seek_preview_x(player: Rect, pointer: f32) -> f32 {
+    if !player.is_finite() || !pointer.is_finite() {
+        return 0.;
+    }
+    if player.width() <= 0. {
+        return player.left();
+    }
+    let inset = 30f32.min(player.width() * 0.5);
+    pointer.clamp(player.left() + inset, player.right() - inset)
+}
+
 pub(super) struct LyricsLayout {
     pub cover: Rect,
     pub lines: Rect,
@@ -224,6 +235,20 @@ pub(in crate::ui) fn resize_hit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn seek_preview_handles_collapsed_player_bounds() {
+        for width in [-30., 0., 1., 24., 59., 60., 640.] {
+            let rect = Rect::from_min_size(pos2(40., 100.), vec2(width, 116.));
+            for pointer in [-100., 50., 2000.] {
+                let x = seek_preview_x(rect, pointer);
+                assert!(x.is_finite());
+                assert!(x >= rect.left() && x <= rect.right().max(rect.left()));
+                if width >= 60. {
+                    assert_eq!(x, pointer.clamp(rect.left() + 30., rect.right() - 30.));
+                }
+            }
+        }
+    }
     use super::*;
     #[test]
     fn queue_and_live_caption_do_not_overlap_when_the_window_is_resized() {

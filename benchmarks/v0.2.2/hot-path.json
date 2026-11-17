@@ -1,0 +1,7 @@
+{
+  "clock_single_writer_median_ms": 12.7212,
+  "clock_two_rmw_median_ms": 25.874000000000002,
+  "copy_bulk_median_ms": 0.486,
+  "copy_scalar_median_ms": 9.6943,
+  "scope": "Seven alternating-order batches; 2000 already-decoded 4096-float stereo packet copies and 8192000 exact sample-clock updates per batch. Isolated hot paths, not total playback CPU or decode throughput."
+}

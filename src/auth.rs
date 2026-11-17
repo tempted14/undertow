@@ -140,12 +140,26 @@ pub fn now() -> u64 {
         .as_secs()
 }
 pub fn http() -> Result<Client> {
-    Ok(Client::builder()
+    Ok(http_builder().build()?)
+}
+fn http_builder() -> reqwest::blocking::ClientBuilder {
+    Client::builder()
         .user_agent(UA)
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(2)
+}
+fn credential_http() -> Result<Client> {
+    // A 307/308 must never forward codes, verifiers or refresh tokens elsewhere.
+    Ok(http_builder()
+        .redirect(reqwest::redirect::Policy::none())
         .build()?)
+}
+fn credential_send(
+    request: reqwest::blocking::RequestBuilder,
+) -> reqwest::Result<reqwest::blocking::Response> {
+    // A configured broker URL can itself contain private query parameters.
+    request.send().map_err(reqwest::Error::without_url)
 }
 pub fn random_urlsafe() -> String {
     let mut b = [0; 32];
@@ -257,7 +271,7 @@ fn token_response(v: serde_json::Value, settings: &Settings, fallback: &str) -> 
 }
 
 fn token_post(settings: &Settings, form: &[(&str, &str)]) -> Result<serde_json::Value> {
-    let client = http()?;
+    let client = credential_http()?;
     let endpoint = if settings.compatibility || settings.token_broker.is_empty() {
         TOKEN_URL
     } else {
@@ -267,7 +281,7 @@ fn token_post(settings: &Settings, form: &[(&str, &str)]) -> Result<serde_json::
         endpoint.starts_with("https://"),
         "Token broker must use HTTPS"
     );
-    let r = client.post(endpoint).form(form).send()?;
+    let r = credential_send(client.post(endpoint).form(form))?;
     let status = r.status();
     if !status.is_success() {
         login_status(&format!("token_exchange_http_{}", status.as_u16()));
@@ -278,7 +292,7 @@ fn token_post(settings: &Settings, form: &[(&str, &str)]) -> Result<serde_json::
         "TIDAL token exchange returned HTTP {}. Check registered redirects, scopes and app access; confidential clients need a token broker.",
         status.as_u16()
     );
-    Ok(r.json()?)
+    Ok(r.json().map_err(reqwest::Error::without_url)?)
 }
 
 pub fn login(
@@ -1007,6 +1021,75 @@ fn relay_file_callback_in(directory: &std::path::Path, raw: &str) -> Result<()> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credential_posts_do_not_follow_body_preserving_redirects() {
+        use super::*;
+        for status in [307, 308] {
+            let destination = TcpListener::bind("127.0.0.1:0").unwrap();
+            destination.set_nonblocking(true).unwrap();
+            let location = format!("http://{}/capture", destination.local_addr().unwrap());
+            let origin = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/token", origin.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = origin.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0; 1];
+                while !request.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let headers = std::str::from_utf8(&request).unwrap();
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                let mut body = vec![0; length];
+                stream.read_exact(&mut body).unwrap();
+                write!(stream, "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            });
+            let response = credential_send(
+                credential_http()
+                    .unwrap()
+                    .post(url)
+                    .timeout(Duration::from_secs(2))
+                    .form(&[("code_verifier", "synthetic-fixture-only")]),
+            )
+            .unwrap();
+            assert_eq!(response.status().as_u16(), status);
+            server.join().unwrap();
+            assert_eq!(
+                destination.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+    }
+    #[test]
+    fn credential_transport_errors_omit_private_url_parameters() {
+        use super::*;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/token?developer_key=private-fixture-value",
+            listener.local_addr().unwrap()
+        );
+        drop(listener);
+        let error = credential_send(
+            credential_http()
+                .unwrap()
+                .post(url)
+                .timeout(Duration::from_secs(2)),
+        )
+        .unwrap_err();
+        assert!(error.url().is_none());
+        let message = error.to_string();
+        assert!(!message.contains("private-fixture-value") && !message.contains("developer_key"));
+    }
     use super::*;
     #[test]
     fn rfc7636_pkce_vector() {

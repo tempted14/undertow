@@ -1,0 +1,90 @@
+{
+  "sha256": "19f8c1545d9147dc510a90e1d44450a86fb4dec0e9bbc3e9e6781c6c6b9ad3b3",
+  "results": [
+    {
+      "name": "tracks",
+      "renderer": "software",
+      "working_set_bytes": 53256192,
+      "private_bytes": 38322176,
+      "cpu_percent_one_core": 2.260987057146362,
+      "ui_frames": 135,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.99968253968254,
+      "duration_seconds": 18.0274744,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196,
+      "retained_lyric_word_layouts": 0
+    },
+    {
+      "name": "line-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 65662976,
+      "private_bytes": 51273728,
+      "cpu_percent_one_core": 5.467048927726139,
+      "ui_frames": 246,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.99968253968254,
+      "duration_seconds": 18.0162831,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196,
+      "retained_lyric_word_layouts": 0
+    },
+    {
+      "name": "word-lyrics",
+      "renderer": "software",
+      "working_set_bytes": 69607424,
+      "private_bytes": 54439936,
+      "cpu_percent_one_core": 18.88682289294995,
+      "ui_frames": 2781,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.969727891156463,
+      "duration_seconds": 18.0045355,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196,
+      "retained_lyric_word_layouts": 4
+    },
+    {
+      "name": "gpu-line-lyrics",
+      "renderer": "OpenGL",
+      "working_set_bytes": 119050240,
+      "private_bytes": 219373568,
+      "cpu_percent_one_core": 1.8633190234028836,
+      "ui_frames": 281,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.9797052154195,
+      "duration_seconds": 18.0059381,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196,
+      "retained_lyric_word_layouts": 0
+    },
+    {
+      "name": "gpu-word-lyrics",
+      "renderer": "OpenGL",
+      "working_set_bytes": 122175488,
+      "private_bytes": 219512832,
+      "cpu_percent_one_core": 14.128711057521794,
+      "ui_frames": 2970,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 17.9897052154195,
+      "duration_seconds": 18.017671,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 196,
+      "retained_lyric_word_layouts": 4
+    },
+    {
+      "name": "high-rate-tracks",
+      "renderer": "software",
+      "working_set_bytes": 56659968,
+      "private_bytes": 39268352,
+      "cpu_percent_one_core": 3.768998747348499,
+      "ui_frames": 154,
+      "underrun_samples": 0,
+      "consumed_audio_seconds": 18.00265625,
+      "duration_seconds": 18.0076743,
+      "pcm_packet_allocations": 18,
+      "decoder_waits": 1690,
+      "retained_lyric_word_layouts": 0
+    }
+  ],
+  "scope": "18-second hidden 1600x1000, requested 120fps with display sync enabled; original local audio/art/lyric fixtures, muted output and isolated data; includes hidden OpenGL if available. Actual UI-frame counts are reported separately from the requested setting. Whole-process CPU, peak working set and private bytes. GPU utilization not inferred from CPU or frame counts."
+}

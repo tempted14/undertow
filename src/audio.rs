@@ -7,7 +7,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex,
+        Arc, Condvar, Mutex, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, TryRecvError},
     },
@@ -33,6 +33,9 @@ pub struct Format {
 
 #[derive(Default)]
 pub struct AudioStats {
+    spool: OnceLock<Weak<SpoolState>>,
+    #[cfg(test)]
+    stream_waits: AtomicU64,
     pub downloaded: AtomicU64,
     pub pcm_allocations: AtomicU64,
     pub decoder_waits: AtomicU64,
@@ -44,6 +47,28 @@ pub struct AudioStats {
     pub done: AtomicBool,
     pub cancel: AtomicBool,
     pub error: Mutex<Option<String>>,
+}
+impl AudioStats {
+    /// Wake a blocked spool reader as well as setting the cancellation flag.
+    /// Only control/decoder threads call this; the audio callback stays lock-free.
+    fn cancel_stream(&self) {
+        self.cancel.store(true, Ordering::Release);
+        if let Some(state) = self.spool.get().and_then(Weak::upgrade) {
+            // Synchronize with the reader's check-and-wait to avoid a lost wake.
+            // Network and disk operations never hold this short progress lock.
+            let _progress = state.progress.lock().unwrap_or_else(|e| e.into_inner());
+            state.ready.notify_all();
+        }
+    }
+    fn record_sample(&self) {
+        // The seek worker also writes the playback clock, so it needs an RMW.
+        self.played_samples.fetch_add(1, Ordering::Relaxed);
+        // Only the source writes the consumed clock. Preserve per-sample
+        // visibility without a second locked read-modify-write instruction.
+        let consumed = self.consumed_samples.load(Ordering::Relaxed);
+        self.consumed_samples
+            .store(consumed.wrapping_add(1), Ordering::Relaxed);
+    }
 }
 
 #[derive(Default)]
@@ -69,6 +94,12 @@ struct SpoolReader {
     state: Arc<SpoolState>,
     position: u64,
 }
+impl Drop for SpoolReader {
+    fn drop(&mut self) {
+        // Includes unused/stale Prepared results, not only actively playing tracks.
+        self.state.stats.cancel_stream();
+    }
+}
 
 impl Read for SpoolReader {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
@@ -85,6 +116,11 @@ impl Read for SpoolReader {
             && p.error.is_none()
             && !self.state.stats.cancel.load(Ordering::Relaxed)
         {
+            #[cfg(test)]
+            self.state
+                .stats
+                .stream_waits
+                .fetch_add(1, Ordering::Release);
             let (next, result) = self
                 .state
                 .ready
@@ -132,6 +168,11 @@ impl Seek for SpoolReader {
                     && state.error.is_none()
                     && !self.state.stats.cancel.load(Ordering::Relaxed)
                 {
+                    #[cfg(test)]
+                    self.state
+                        .stats
+                        .stream_waits
+                        .fetch_add(1, Ordering::Release);
                     let (s, t) = self
                         .state
                         .ready
@@ -148,6 +189,12 @@ impl Seek for SpoolReader {
                 state.bytes as i128 + p as i128
             }
         };
+        if self.state.stats.cancel.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Playback cancelled",
+            ));
+        }
         if target < 0 || target > MAX_SPOOL as i128 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -175,6 +222,7 @@ fn spool(plan: StreamPlan, stats: Arc<AudioStats>, retry: bool) -> Result<SpoolR
         stats,
         path,
     });
+    let _ = state.stats.spool.set(Arc::downgrade(&state));
     let state2 = state.clone();
     std::thread::Builder::new()
         .name("tidal-stream".into())
@@ -457,6 +505,59 @@ impl NativeDecoder {
         }
         Ok(())
     }
+
+    /// Append the same interleaved samples as the iterator, copying whole spans
+    /// from each decoded packet instead of advancing one sample at a time.
+    fn copy_samples(&mut self, output: &mut Vec<f32>, count: usize) {
+        let end = output.len().saturating_add(count);
+        while output.len() < end {
+            if self.position >= self.buffer.len() && !self.decode_packet() {
+                break;
+            }
+            let discard = self.discard.min(self.buffer.len() - self.position);
+            self.position += discard;
+            self.discard -= discard;
+            let count = (self.buffer.len() - self.position).min(end - output.len());
+            output.extend_from_slice(&self.buffer[self.position..self.position + count]);
+            self.position += count;
+        }
+    }
+
+    fn decode_packet(&mut self) -> bool {
+        loop {
+            let packet = match self.demuxer.next_packet() {
+                Ok(p) => p,
+                Err(symphonia::core::errors::Error::IoError(e))
+                    if e.kind() == io::ErrorKind::UnexpectedEof =>
+                {
+                    return false;
+                }
+                Err(e) => {
+                    if !self.stats.cancel.load(Ordering::Relaxed)
+                        && let Ok(mut error) = self.stats.error.lock()
+                    {
+                        *error = Some(format!("Audio read failed: {e}"));
+                    }
+                    return false;
+                }
+            };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            let decoded = match self.codec.decode(&packet) {
+                Ok(d) => d,
+                Err(e) => {
+                    if let Ok(mut error) = self.stats.error.lock() {
+                        *error = Some(format!("Audio decode failed: {e}"));
+                    }
+                    return false;
+                }
+            };
+            self.buffer.copy(decoded);
+            self.position = 0;
+            return true;
+        }
+    }
 }
 impl Iterator for NativeDecoder {
     type Item = f32;
@@ -471,36 +572,9 @@ impl Iterator for NativeDecoder {
                 }
                 return Some(sample);
             }
-            let packet = match self.demuxer.next_packet() {
-                Ok(p) => p,
-                Err(symphonia::core::errors::Error::IoError(e))
-                    if e.kind() == io::ErrorKind::UnexpectedEof =>
-                {
-                    return None;
-                }
-                Err(e) => {
-                    if !self.stats.cancel.load(Ordering::Relaxed)
-                        && let Ok(mut error) = self.stats.error.lock()
-                    {
-                        *error = Some(format!("Audio read failed: {e}"));
-                    }
-                    return None;
-                }
-            };
-            if packet.track_id() != self.track_id {
-                continue;
+            if !self.decode_packet() {
+                return None;
             }
-            let decoded = match self.codec.decode(&packet) {
-                Ok(d) => d,
-                Err(e) => {
-                    if let Ok(mut error) = self.stats.error.lock() {
-                        *error = Some(format!("Audio decode failed: {e}"));
-                    }
-                    return None;
-                }
-            };
-            self.buffer.copy(decoded);
-            self.position = 0;
         }
     }
 }
@@ -530,7 +604,7 @@ impl Prepared {
             }
         }
         if result.is_err() {
-            stats.cancel.store(true, Ordering::Relaxed);
+            stats.cancel_stream();
         }
         result
     }
@@ -624,8 +698,7 @@ impl Iterator for PcmSource {
         }
         let s = *self.buffer.get(self.pos)?;
         self.pos += 1;
-        self.stats.played_samples.fetch_add(1, Ordering::Relaxed);
-        self.stats.consumed_samples.fetch_add(1, Ordering::Relaxed);
+        self.stats.record_sample();
         Some(s)
     }
 }
@@ -677,7 +750,7 @@ impl Audio {
             .saturating_sub(p.decoder.position)
             .min(PCM_SAMPLES);
         let mut samples = Vec::with_capacity(PCM_SAMPLES);
-        samples.extend(p.decoder.by_ref().take(initial));
+        p.decoder.copy_samples(&mut samples, initial);
         stats.pcm_allocations.store(1, Ordering::Relaxed);
         let first = Packet { samples, epoch: 0 };
         tx.try_send(first)
@@ -714,7 +787,7 @@ impl Audio {
                             Vec::with_capacity(PCM_SAMPLES)
                         });
                     samples.clear();
-                    samples.extend(p.decoder.by_ref().take(PCM_SAMPLES));
+                    p.decoder.copy_samples(&mut samples, PCM_SAMPLES);
                     if samples.is_empty() {
                         spare = Some(samples);
                         stats2.done.store(true, Ordering::Release);
@@ -798,7 +871,7 @@ impl Audio {
 }
 impl Drop for Audio {
     fn drop(&mut self) {
-        self.stats.cancel.store(true, Ordering::Relaxed);
+        self.stats.cancel_stream();
         self.decoder_thread.unpark();
         self.sink.stop();
     }
@@ -826,7 +899,7 @@ pub fn save_download(plan: StreamPlan, path: &Path) -> Result<()> {
         Ok(())
     })();
     if result.is_err() {
-        reader.state.stats.cancel.store(true, Ordering::Relaxed);
+        reader.state.stats.cancel_stream();
         let _ = std::fs::remove_file(part);
     }
     result
@@ -835,6 +908,156 @@ pub fn save_download(plan: StreamPlan, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancellation_wakes_stalled_reads_and_length_seeks_without_retaining_spools() {
+        for seek in [false, true] {
+            let path = std::env::temp_dir().join(format!(
+                "undertow-cancel-{}.part",
+                crate::auth::random_urlsafe()
+            ));
+            File::create(&path).unwrap();
+            let stats = Arc::new(AudioStats::default());
+            let state = Arc::new(SpoolState {
+                progress: Mutex::new(Progress::default()),
+                ready: Condvar::new(),
+                stats: stats.clone(),
+                path: path.clone(),
+            });
+            let weak = Arc::downgrade(&state);
+            let _ = stats.spool.set(weak.clone());
+            let mut reader = SpoolReader {
+                file: File::open(&path).unwrap(),
+                state: state.clone(),
+                position: 0,
+            };
+            let (finished, result) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let error = if seek {
+                    reader.seek(SeekFrom::End(0)).unwrap_err()
+                } else {
+                    reader.read(&mut [0; 8]).unwrap_err()
+                };
+                finished.send(error.kind()).unwrap();
+            });
+            let start = std::time::Instant::now();
+            while stats.stream_waits.load(Ordering::Acquire) == 0 {
+                assert!(start.elapsed() < Duration::from_secs(2));
+                std::thread::yield_now();
+            }
+            stats.cancel_stream();
+            let outcome = result.recv_timeout(Duration::from_secs(1));
+            // Also clean up promptly if a regression loses the cancellation wake.
+            if outcome.is_err() {
+                state.ready.notify_all();
+            }
+            assert_eq!(outcome.unwrap(), io::ErrorKind::Interrupted);
+            thread.join().unwrap();
+            drop(state);
+            assert!(
+                weak.upgrade().is_none(),
+                "Cancellation introduced a strong ownership cycle"
+            );
+            assert!(!path.exists(), "Unused spool file was retained");
+        }
+    }
+    #[test]
+    #[ignore = "Explicit alternating-order hot-path benchmark; not a timing assertion"]
+    fn pcm_hot_path_benchmark() {
+        use std::{hint::black_box, time::Instant};
+        use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Channels, Signal, SignalSpec};
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/24bit-192khz.flac");
+        let mut decoder = Prepared::local(&path).unwrap().decoder;
+        let mut packet = AudioBuffer::<f32>::new(
+            2048,
+            SignalSpec::new(192000, Channels::FRONT_LEFT | Channels::FRONT_RIGHT),
+        );
+        packet.render_reserved(None);
+        for channel in 0..2 {
+            for (i, sample) in packet.chan_mut(channel).iter_mut().enumerate() {
+                *sample = (i as f32 + channel as f32) / 8192.;
+            }
+        }
+        decoder
+            .buffer
+            .copy(AudioBufferRef::F32(std::borrow::Cow::Borrowed(&packet)));
+        let mut copies = [vec![], vec![]];
+        let mut clocks = [vec![], vec![]];
+        let batches = 2000;
+        let samples = 4096 * batches;
+        for round in 0..7 {
+            for old in if round % 2 == 0 {
+                [true, false]
+            } else {
+                [false, true]
+            } {
+                let mut output = Vec::with_capacity(4096);
+                let started = Instant::now();
+                for _ in 0..batches {
+                    decoder.position = 0;
+                    output.clear();
+                    if old {
+                        output.extend(decoder.by_ref().take(4096));
+                    } else {
+                        decoder.copy_samples(&mut output, 4096);
+                    }
+                    black_box(output.as_slice());
+                }
+                copies[usize::from(!old)].push(started.elapsed().as_secs_f64() * 1000.);
+                let stats = black_box(AudioStats::default());
+                let started = Instant::now();
+                for _ in 0..samples {
+                    let stats = black_box(&stats);
+                    if old {
+                        stats.played_samples.fetch_add(1, Ordering::Relaxed);
+                        stats.consumed_samples.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        stats.record_sample();
+                    }
+                }
+                clocks[usize::from(!old)].push(started.elapsed().as_secs_f64() * 1000.);
+                assert_eq!(stats.played_samples.load(Ordering::Relaxed), samples as u64);
+                assert_eq!(
+                    stats.consumed_samples.load(Ordering::Relaxed),
+                    samples as u64
+                );
+            }
+        }
+        for times in copies.iter_mut().chain(clocks.iter_mut()) {
+            times.sort_by(f64::total_cmp);
+        }
+        let report = serde_json::json!({"scope":"Seven alternating-order batches; 2000 already-decoded 4096-float stereo packet copies and 8192000 exact sample-clock updates per batch. Isolated hot paths, not total playback CPU or decode throughput.","copy_scalar_median_ms":copies[0][3],"copy_bulk_median_ms":copies[1][3],"clock_two_rmw_median_ms":clocks[0][3],"clock_single_writer_median_ms":clocks[1][3]});
+        println!("{report}");
+        if let Ok(path) = std::env::var("UNDERTOW_BENCH_REPORT") {
+            crate::config::write_json(Path::new(&path), &report).unwrap();
+        }
+    }
+    #[test]
+    fn bulk_pcm_matches_scalar_across_packets_partial_batches_seeks_and_eof() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/24bit-192khz.flac");
+        for seek_ms in [0, 2, 8] {
+            let mut scalar = Prepared::local(&path).unwrap().decoder;
+            let mut bulk = Prepared::local(&path).unwrap().decoder;
+            scalar.try_seek(Duration::from_millis(seek_ms)).unwrap();
+            bulk.try_seek(Duration::from_millis(seek_ms)).unwrap();
+            let expected: Vec<_> = scalar.collect();
+            let mut actual = Vec::new();
+            for count in [1, 7, 4095, 4096, 4097, 32_768] {
+                bulk.copy_samples(&mut actual, count);
+            }
+            while actual.len() < expected.len() {
+                let before = actual.len();
+                bulk.copy_samples(&mut actual, 4096);
+                assert!(
+                    actual.len() > before,
+                    "Bulk decoder stopped before scalar EOF"
+                );
+            }
+            assert_eq!(actual, expected);
+            let end = actual.len();
+            bulk.copy_samples(&mut actual, 4096);
+            assert_eq!(actual.len(), end);
+        }
+    }
     #[test]
     fn pcm_recycles_consumed_and_stale_packets_without_changing_samples_or_clocks() {
         let (tx, rx) = mpsc::sync_channel(4);
@@ -979,7 +1202,8 @@ mod tests {
             sample_rate: 192000,
         };
         let mut prepared = Prepared::remote(plan, true).unwrap();
-        let samples: Vec<_> = prepared.decoder.by_ref().take(4096).collect();
+        let mut samples = Vec::new();
+        prepared.decoder.copy_samples(&mut samples, 4096);
         assert_eq!(samples.len(), 4096);
         assert!(samples.iter().any(|s| s.abs() > 0.0001));
         assert!(
