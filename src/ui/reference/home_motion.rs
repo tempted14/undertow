@@ -10,6 +10,9 @@ impl App {
                 available.bottom() - reserved_player(ui.ctx()) - 18.,
             ),
         );
+        if !viewport.is_finite() || viewport.width() <= 10. || viewport.height() <= 0. {
+            return;
+        }
         let limit = (self.home_content_height - viewport.height()).max(0.);
         if ui.rect_contains_pointer(viewport) {
             // egui already smooths the wheel. Preserve its fractional displacement;
@@ -37,15 +40,15 @@ impl App {
         if limit > 0. {
             let track =
                 Rect::from_min_max(viewport.right_top() - vec2(9., 0.), viewport.right_bottom());
-            let thumb_height =
-                (viewport.height() * viewport.height() / self.home_content_height).max(45.);
+            let thumb_height = (viewport.height() * viewport.height() / self.home_content_height)
+                .clamp(45f32.min(viewport.height()), viewport.height());
             let response = ui.interact(track, Id::new("home-scrollbar"), Sense::click_and_drag());
             if (response.dragged() || response.clicked())
                 && let Some(p) = response.interact_pointer_pos()
             {
                 self.home_scroll = ((p.y - track.top() - thumb_height * 0.5)
-                    / (track.height() - thumb_height))
-                    .clamp(0., 1.)
+                    / (track.height() - thumb_height).max(1.))
+                .clamp(0., 1.)
                     * limit;
                 ui.ctx().request_repaint();
             }

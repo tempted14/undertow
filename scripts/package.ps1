@@ -26,7 +26,7 @@ function Write-Archive([string]$ArchivePath, [object[]]$Entries) {
         } finally { $zip.Dispose() }
     } finally { $stream.Dispose() }
 }
-$documents = @('README.md','VALIDATION.md','PLUGIN-FEATURES.md','RESEARCH.md','AUTH-BROKER.md','THIRD-PARTY.md','THIRD-PARTY-LICENSES.txt','LICENSE')
+$documents = @('README.md','VALIDATION.md','PLUGIN-FEATURES.md','RESEARCH.md','AUTH-BROKER.md','THIRD-PARTY.md','THIRD-PARTY-LICENSES.txt','LICENSE','assets/tidal-ui/README.md')
 $portableEntries = @([pscustomobject]@{Path=$outputExe;Name='Undertow/Undertow.exe'})
 $documentEntries = foreach ($document in $documents) {
     $relative = if (Test-Path -LiteralPath (Join-Path $sourceRoot $document)) { $document } else { "docs/$document" }
@@ -52,6 +52,12 @@ foreach ($document in $documentEntries) { $sourceEntries += [pscustomobject]@{Pa
 foreach ($fileName in @('Cargo.toml','Cargo.lock','.gitignore','.gitattributes')) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot $fileName))) { continue }
     $sourceEntries += [pscustomobject]@{Path=(Join-Path $sourceRoot $fileName);Name="undertow/$fileName"}
+}
+foreach ($face in @('regular','medium','demibold')) {
+    $relative = "assets/tidal-ui/nationale-$face.ttf"
+    $path = Join-Path $sourceRoot $relative
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing UI typeface: $relative" }
+    $sourceEntries += [pscustomobject]@{Path=$path;Name="undertow/$relative"}
 }
 # Explicit allowlist: never include target/, account data, caches, work files, or credentials.
 foreach ($directory in @('src','vendor','tests','scripts','licenses','benchmarks','.github')) {

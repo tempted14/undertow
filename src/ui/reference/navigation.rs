@@ -6,11 +6,19 @@ impl App {
             return;
         }
         // Keep the user's full-width preference; narrow windows temporarily use the rail.
-        let collapsed = self.settings.sidebar_collapsed || ctx.content_rect().width() < 1100.;
-        let maximum = (ctx.content_rect().width() - 680.).clamp(265., 380.);
+        let collapsed = self.settings.sidebar_collapsed || ctx.content_rect().width() < 980.;
+        let maximum = (ctx.content_rect().width() - 680.).clamp(234., 390.);
         let expanded = self.sidebar_expanded_width.min(maximum);
-        let progress = ctx.animate_bool_with_time(Id::new("sidebar-motion"), !collapsed, 0.24);
-        let width = 76. + (expanded - 76.) * layout::ease(progress);
+        let progress = ctx.animate_bool_with_time(
+            Id::new("sidebar-motion"),
+            !collapsed,
+            if self.settings.animated_lyrics {
+                0.22 / self.settings.motion_speed
+            } else {
+                0.
+            },
+        );
+        let width = 68. + (expanded - 68.) * layout::ease(progress);
         let moving = progress > 0. && progress < 1.;
         let panel = egui::SidePanel::left("library-navigation")
             .resizable(!collapsed && !moving)
@@ -18,39 +26,31 @@ impl App {
             .width_range(if moving || collapsed {
                 width..=width
             } else {
-                265. ..=maximum
+                234. ..=maximum
             })
             .frame(
                 Frame::new()
-                    .fill(Color32::from_rgb(10, 10, 10))
-                    .inner_margin(Margin::symmetric(if collapsed { 12 } else { 20 }, 0)),
+                    .fill(design::SIDEBAR)
+                    .inner_margin(Margin::symmetric(if collapsed { 9 } else { 21 }, 0)),
             )
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0., 0.);
-                let (header, _) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), if collapsed { 104. } else { 76. }),
-                    Sense::hover(),
-                );
-                ui.painter().text(
-                    if collapsed {
-                        header.center_top() + vec2(0., 30.)
-                    } else {
-                        header.left_top() + vec2(12., 30.)
-                    },
-                    if collapsed {
-                        Align2::CENTER_CENTER
-                    } else {
-                        Align2::LEFT_CENTER
-                    },
-                    if collapsed { "U" } else { "UNDERTOW" },
-                    font(if collapsed { 25. } else { 23. }, true),
-                    TEXT,
-                );
+                let (header, _) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 78.), Sense::hover());
+                if !collapsed {
+                    design::mark(
+                        ui.painter(),
+                        Rect::from_center_size(
+                            header.left_center() + vec2(27., 0.),
+                            vec2(36., 24.),
+                        ),
+                    );
+                }
                 let toggle = Rect::from_center_size(
                     if collapsed {
-                        pos2(header.center().x, header.top() + 76.)
+                        header.center()
                     } else {
-                        pos2(header.right() - 6., header.top() + 31.)
+                        header.right_center() - vec2(5., 0.)
                     },
                     vec2(32., 32.),
                 );
@@ -78,8 +78,8 @@ impl App {
                     self.schedule_settings_save();
                 }
                 for (glyph, title, page) in [
-                    ("music", "Music", Some(Page::Home)),
-                    ("collection", "Collection", Some(Page::Favorites)),
+                    ("music", "Music", Page::Home),
+                    ("collection", "Collection", Page::Favorites),
                 ] {
                     let selected = match glyph {
                         "music" => {
@@ -97,14 +97,15 @@ impl App {
                     };
                     let (r, b) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 52.), Sense::click());
+                    let b = b.on_hover_cursor(egui::CursorIcon::PointingHand);
                     if selected || b.hovered() {
                         ui.painter().rect_filled(
                             r,
                             16,
                             if selected {
-                                Color32::from_gray(46)
+                                design::SELECTED
                             } else {
-                                Color32::from_gray(24)
+                                design::HOVER
                             },
                         );
                     }
@@ -118,35 +119,40 @@ impl App {
                     );
                     paint_icon(
                         ui.painter(),
-                        Rect::from_center_size(c, vec2(29., 29.)),
+                        Rect::from_center_size(c, vec2(26., 26.)),
                         glyph,
-                        if selected { TEXT } else { GREY },
+                        if selected { design::BRAND } else { GREY },
                     );
                     if !collapsed {
                         ui.painter().text(
                             pos2(r.left() + 53., r.center().y),
                             Align2::LEFT_CENTER,
                             title,
-                            font(18., true),
+                            font(17., true),
                             if selected { TEXT } else { GREY },
                         );
+                        if glyph == "collection" {
+                            paint_icon(
+                                ui.painter(),
+                                Rect::from_center_size(
+                                    r.right_center() - vec2(20., 0.),
+                                    vec2(18., 18.),
+                                ),
+                                "forward",
+                                GREY,
+                            );
+                        }
                     }
-                    if b.clicked()
-                        && let Some(ref page) = page
-                    {
+                    if b.clicked() {
                         self.page = page.clone();
                         self.search_preview = false;
-                        if self.connected && *page == Page::Favorites {
+                        if self.connected && page == Page::Favorites {
                             self.send(Command::Favorites);
                         }
                     }
-                    b.on_hover_text(if page.is_some() {
-                        title
-                    } else {
-                        "Cloud uploads are unavailable. Drop local music into the player."
-                    });
+                    b.on_hover_text(title);
                 }
-                ui.add_space(if collapsed { 20. } else { 34. });
+                ui.add_space(if collapsed { 16. } else { 26. });
                 if !collapsed {
                     let (r, _) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 34.), Sense::hover());
@@ -154,8 +160,8 @@ impl App {
                         r.left_center() + vec2(3., 0.),
                         Align2::LEFT_CENTER,
                         "All playlists",
-                        font(18., true),
-                        Color32::from_gray(117),
+                        font(17., true),
+                        GREY,
                     );
                     for (glyph, x) in [("plus", r.right() - 42.), ("sort", r.right() - 5.)] {
                         let rect = Rect::from_center_size(pos2(x, r.center().y), vec2(25., 25.));
@@ -171,21 +177,22 @@ impl App {
                                     ..Default::default()
                                 });
                             } else {
-                                self.playlists.reverse();
+                                Arc::make_mut(&mut self.playlists).reverse();
                             }
                         }
                     }
                     ui.add_space(12.);
                 }
                 let lists = self.playlists.clone();
+                let row_height = if collapsed { 52. } else { 68. };
                 egui::ScrollArea::vertical()
                     .id_salt("library-playlists")
                     .max_height((ui.available_height() - reserved_player(ctx) - 18.).max(80.))
                     .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for playlist in lists {
+                    .show_rows(ui, row_height, lists.len(), |ui, range| {
+                        for playlist in &lists[range] {
                             let (row, response) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), if collapsed { 58. } else { 68. }),
+                                vec2(ui.available_width(), row_height),
                                 Sense::click(),
                             );
                             let selected =
@@ -196,17 +203,21 @@ impl App {
                             if response.hovered() || selected {
                                 ui.painter().rect_filled(
                                     row,
-                                    7,
-                                    Color32::from_gray(if selected { 30 } else { 20 }),
+                                    design::CONTROL,
+                                    if selected {
+                                        design::SELECTED
+                                    } else {
+                                        design::SURFACE
+                                    },
                                 );
                             }
-                            let size = if collapsed { 42. } else { 48. };
+                            let size = if collapsed { 38. } else { 47. };
                             let cover = Rect::from_center_size(
                                 pos2(
                                     if collapsed {
                                         row.center().x
                                     } else {
-                                        row.left() + 27.
+                                        row.left() + 27.5
                                     },
                                     row.center().y,
                                 ),
@@ -217,20 +228,15 @@ impl App {
                                 ..Default::default()
                             };
                             let art = at(ui, cover, ("library-cover", &playlist.id), |ui| {
-                                self.cover(ui, &track, size)
+                                self.cover_with_radius(ui, &track, size, design::ART)
                             });
                             if playing {
                                 ui.painter()
                                     .rect_filled(cover, 5, Color32::from_black_alpha(100));
-                                paint_icon(
-                                    ui.painter(),
-                                    cover.shrink(12.),
-                                    "volume",
-                                    Color32::from_rgb(239, 197, 20),
-                                );
+                                paint_icon(ui.painter(), cover.shrink(12.), "volume", ACCENT);
                             }
                             let text = Rect::from_min_max(
-                                row.min + vec2(67., 10.),
+                                row.min + vec2(65., 13.),
                                 row.max - vec2(6., 0.),
                             );
                             let text_clicked = if !collapsed {
@@ -238,7 +244,7 @@ impl App {
                                     label(
                                         ui,
                                         &playlist.title,
-                                        18.,
+                                        16.,
                                         true,
                                         if playing {
                                             Color32::from_rgb(239, 197, 20)
@@ -250,7 +256,7 @@ impl App {
                                     label(
                                         ui,
                                         format!("{} items", playlist.count),
-                                        15.,
+                                        13.,
                                         false,
                                         GREY,
                                     );
@@ -318,7 +324,7 @@ impl App {
                     });
             });
         if !collapsed && !moving {
-            self.sidebar_expanded_width = panel.response.rect.width().clamp(265., maximum);
+            self.sidebar_expanded_width = panel.response.rect.width().clamp(234., maximum);
         }
     }
 }

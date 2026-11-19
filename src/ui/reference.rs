@@ -10,6 +10,7 @@ mod home_motion;
 pub(in crate::ui) mod layout;
 mod lyric_navigation;
 mod queue;
+mod seek_bar;
 use layout::{PlayerLayout, columns, reserved_player};
 pub(super) mod interactions;
 mod navigation;
@@ -17,7 +18,7 @@ mod now_playing;
 mod playlist;
 mod settings;
 
-const GREY: Color32 = Color32::from_rgb(150, 150, 144);
+const GREY: Color32 = design::MUTED;
 
 fn font(size: f32, bold: bool) -> FontId {
     FontId::new(
@@ -172,6 +173,11 @@ fn paint_icon(p: &egui::Painter, rect: Rect, name: &str, color: Color32) {
         "queue" => {
             for y in [-0.65, 0., 0.65] {
                 line((-0.9, y), (0.9, y));
+            }
+        }
+        "menu" => {
+            for y in [-0.7, 0., 0.7] {
+                line((-1., y), (1., y));
             }
         }
         "music-plus" => {
@@ -474,7 +480,7 @@ impl App {
         }
         let rect = ctx.content_rect();
         let p = ctx.layer_painter(egui::LayerId::background());
-        p.rect_filled(rect, 0, Color32::BLACK);
+        p.rect_filled(rect, 0, design::CANVAS);
         if matches!(
             self.page,
             Page::Home
@@ -501,6 +507,26 @@ impl App {
         });
         let atmosphere = self.settings.cover_theme
             && (!matches!(self.page, Page::Playlist(_)) || self.settings.playlist_background);
+        if self.page == Page::Lyrics && atmosphere && !self.settings.frosted_glass {
+            let color = art
+                .map(|a| Color32::from_rgb(a.palette[0], a.palette[1], a.palette[2]))
+                .unwrap_or(design::CHROME);
+            let mut shade = egui::Mesh::default();
+            let top = Color32::from_gray(22).lerp_to_gamma(color, 0.58);
+            let bottom = top.lerp_to_gamma(Color32::BLACK, 0.32);
+            for (vertex, tint) in [
+                (rect.left_top(), top),
+                (rect.right_top(), top),
+                (rect.left_bottom(), bottom),
+                (rect.right_bottom(), bottom),
+            ] {
+                shade.colored_vertex(vertex, tint);
+            }
+            shade.add_triangle(0, 1, 2);
+            shade.add_triangle(1, 3, 2);
+            p.add(egui::Shape::mesh(shade));
+            return;
+        }
         if atmosphere
             && self.settings.frosted_glass
             && let Some(a) = art
@@ -522,7 +548,12 @@ impl App {
             p.rect_filled(
                 rect,
                 0,
-                Color32::from_black_alpha(if self.page == Page::Lyrics { 8 } else { 105 }),
+                Color32::from_rgba_unmultiplied(
+                    15,
+                    16,
+                    21,
+                    if self.page == Page::Lyrics { 120 } else { 145 },
+                ),
             );
             if self.page == Page::Lyrics {
                 let mut shade = egui::Mesh::default();
@@ -614,16 +645,58 @@ impl App {
     }
     pub(super) fn reference_title(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("title")
-            .exact_height(32.)
-            .frame(Frame::new().fill(Color32::from_black_alpha(210)))
+            .exact_height(design::TITLE_BAR)
+            .frame(Frame::new().fill(design::SIDEBAR))
             .show(ctx, |ui| {
                 let full = ui.max_rect();
                 let p = ui.painter().clone();
+                let menu = Rect::from_center_size(
+                    full.left_center() + vec2(30., 0.),
+                    vec2(38., design::TITLE_BAR),
+                );
+                let button = ui
+                    .interact(menu, Id::new("window-menu"), Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                paint_icon(
+                    &p,
+                    menu.shrink(7.),
+                    "menu",
+                    if button.hovered() { TEXT } else { GREY },
+                );
+                egui::Popup::menu(&button).show(|ui| {
+                    if ui.button("Music").clicked() {
+                        self.page = Page::Home;
+                        ui.close();
+                    }
+                    if ui.button("Settings").clicked() {
+                        self.page = Page::Settings;
+                        ui.close();
+                    }
+                    if self.connected && ui.button("Refresh recommendations").clicked() {
+                        self.refresh_discovery();
+                        ui.close();
+                    }
+                    if ui
+                        .button(if self.settings.show_sidebar {
+                            "Hide sidebar"
+                        } else {
+                            "Show sidebar"
+                        })
+                        .clicked()
+                    {
+                        self.settings.show_sidebar = !self.settings.show_sidebar;
+                        self.schedule_settings_save();
+                        ui.close();
+                    }
+                    if ui.button("Quit Undertow").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
                 p.text(
-                    full.min + vec2(14., 15.),
+                    full.left_center() + vec2(66., 0.),
                     Align2::LEFT_CENTER,
-                    "UNDERTOW",
-                    font(17., true),
+                    "Undertow",
+                    font(15., true),
                     TEXT,
                 );
                 let drag = Rect::from_min_max(
@@ -642,7 +715,7 @@ impl App {
                 for (i, name) in ["close", "maximize", "minimize"].into_iter().enumerate() {
                     let r = Rect::from_min_size(
                         pos2(full.right() - (i + 1) as f32 * 60., full.top()),
-                        vec2(60., 32.),
+                        vec2(60., design::TITLE_BAR),
                     );
                     let b = ui
                         .interact(r, Id::new(("window", name)), Sense::click())
@@ -682,23 +755,38 @@ impl App {
         self.navigation_sidebar(ctx);
     }
     pub(super) fn reference_toolbar(&mut self, ui: &mut egui::Ui) {
-        if matches!(self.page, Page::Playlist(_)) {
-            self.playlist_toolbar(ui);
-            return;
-        }
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 76.), Sense::hover());
+        let (r, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), design::TOOLBAR), Sense::hover());
         let p = ui.painter().clone();
-        let arrows = Rect::from_min_size(r.min + vec2(22., 16.), vec2(93., 48.));
-        p.rect_filled(arrows, 25, Color32::from_rgb(29, 29, 31));
+        let arrows = Rect::from_min_size(r.min + vec2(22., 16.), vec2(92., 48.));
+        p.rect_filled(arrows, 24, design::CHROME);
+
         for (name, x) in [
-            ("back", arrows.left() + 27.),
-            ("forward", arrows.right() - 27.),
+            ("back", arrows.left() + 23.),
+            ("forward", arrows.right() - 23.),
         ] {
             let a = Rect::from_center_size(pos2(x, arrows.center().y), vec2(31., 31.));
             let b = ui
                 .interact(a, Id::new(("history", name)), Sense::click())
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
-            paint_icon(&p, a, name, GREY);
+            let available = if name == "back" {
+                !self.back_history.is_empty()
+            } else {
+                !self.forward_history.is_empty()
+            };
+            if available && b.hovered() {
+                p.rect_filled(a, 16, design::HOVER);
+            }
+            paint_icon(
+                &p,
+                a,
+                name,
+                if available {
+                    TEXT
+                } else {
+                    GREY.gamma_multiply(0.45)
+                },
+            );
             if b.clicked() {
                 if name == "back" {
                     if let Some(page) = self.back_history.pop() {
@@ -713,28 +801,40 @@ impl App {
                 }
             }
         }
-        let avatar = Rect::from_center_size(pos2(r.right() - 35., r.top() + 40.), vec2(42., 42.));
+        let avatar = Rect::from_center_size(pos2(r.right() - 26., r.top() + 40.), vec2(42., 42.));
         self.profile_button(ui, avatar);
-        let width = (r.width() * 0.34).clamp(200., 368.);
+        let search_id = Id::new("desktop-search-input");
+        let expanded = self.search_preview || ui.memory(|memory| memory.has_focus(search_id));
+        let expansion = layout::ease(ui.ctx().animate_bool_with_time(
+            search_id.with("width"),
+            expanded,
+            if self.settings.animated_lyrics {
+                design::FAST
+            } else {
+                0.
+            },
+        ));
+        let width = ((r.width() * 0.40).clamp(118., 368.) + 158. * expansion)
+            .min((avatar.left() - arrows.right() - 36.).max(118.));
         let search = Rect::from_min_size(
-            pos2(avatar.left() - 24. - width, r.top() + 16.),
+            pos2(avatar.left() - 22. - width, r.top() + 16.),
             vec2(width, 48.),
         );
-        p.rect_filled(search, 25, Color32::from_rgba_unmultiplied(37, 37, 35, 240));
+        p.rect_filled(search, 24, design::CHROME);
         paint_icon(
             &p,
-            Rect::from_center_size(search.left_center() + vec2(23., 0.), vec2(25., 25.)),
+            Rect::from_center_size(search.left_center() + vec2(23., 0.), vec2(21., 21.)),
             "search",
             GREY,
         );
         let response = at(
             ui,
-            Rect::from_min_max(search.min + vec2(54., 7.), search.max - vec2(42., 6.)),
+            Rect::from_min_max(search.min + vec2(58., 8.), search.max - vec2(38., 5.)),
             "search-input",
             |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .font(egui::TextStyle::Body)
+                        .id(search_id)
                         .font(FontId::proportional(18.))
                         .hint_text("Search")
                         .frame(false)
@@ -742,6 +842,14 @@ impl App {
                 )
             },
         );
+        if response.has_focus() {
+            p.rect_stroke(
+                search,
+                24,
+                Stroke::new(1_f32, design::BRAND),
+                egui::StrokeKind::Inside,
+            );
+        }
         self.search_input_response(ui, &response, search);
         if self.signing_in {
             at(
@@ -788,48 +896,44 @@ impl App {
         }
     }
     pub(super) fn reference_home(&mut self, ui: &mut egui::Ui) {
-        let margin = (ui.available_width() * 0.052).clamp(30., 60.) as i8;
+        let screen = ui.ctx().content_rect();
+        let margin = design::browse_margin(screen.right() - ui.max_rect().left()).round() as i8;
+        let right_gutter = if self.queue_open && layout::queue_docked(screen) {
+            12
+        } else {
+            22
+        };
+        let compact = ui.ctx().content_rect().height() < 700.;
         Frame::new()
             .inner_margin(Margin {
                 left: margin,
-                right: (margin - 4).max(26),
+                right: (margin - right_gutter).max(16),
                 top: 0,
                 bottom: 120,
             })
             .show(ui, |ui| {
-                let (tabs, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), 40.), Sense::hover());
-                for (i, (text, x)) in [("For you", 0.)].into_iter().enumerate() {
-                    let color = if i == 0 { TEXT } else { GREY };
-                    ui.painter().text(
-                        tabs.min + vec2(x, 7.),
-                        Align2::LEFT_TOP,
-                        text,
-                        font(18., true),
-                        color,
-                    );
-                }
-                ui.painter().line_segment(
-                    [tabs.left_bottom(), tabs.right_bottom()],
-                    Stroke::new(1.0_f32, Color32::from_white_alpha(35)),
+                let (header, _) = ui.allocate_exact_size(
+                    vec2(ui.available_width(), if compact { 44. } else { 60. }),
+                    Sense::hover(),
                 );
-                ui.painter().line_segment(
-                    [tabs.left_bottom(), tabs.left_bottom() + vec2(63., 0.)],
-                    Stroke::new(3.0_f32, TEXT),
+                ui.painter().text(
+                    header.left_center() + vec2(0., 4.),
+                    Align2::LEFT_CENTER,
+                    "For you",
+                    font(17., true),
+                    TEXT,
                 );
-                if self.connected {
-                    at(
-                        ui,
-                        Rect::from_min_size(tabs.right_top() - vec2(88., 0.), vec2(88., 32.)),
-                        "home-refresh",
-                        |ui| {
-                            if small_pill(ui, "Refresh").clicked() {
-                                self.refresh_discovery();
-                            }
-                        },
-                    );
-                }
-                ui.add_space(42.);
+                ui.painter().hline(
+                    header.x_range(),
+                    header.bottom(),
+                    Stroke::new(1_f32, design::SURFACE),
+                );
+                ui.painter().hline(
+                    header.left()..=header.left() + 60.,
+                    header.bottom(),
+                    Stroke::new(2_f32, TEXT),
+                );
+                ui.add_space(if compact { 16. } else { 35. });
                 if !self.connected {
                     card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -889,76 +993,8 @@ impl App {
                 let p = ui.painter().clone();
                 self.player_glass(&p, r);
                 let duration = self.duration();
-                let position = self.position();
-                let progress = Rect::from_min_size(r.min, vec2(r.width(), 4.));
-                p.rect_filled(
-                    progress,
-                    2,
-                    Color32::from_rgba_unmultiplied(123, 124, 109, 95),
-                );
-                if duration > 0. {
-                    p.rect_filled(
-                        Rect::from_min_size(
-                            progress.min,
-                            vec2(
-                                progress.width() * (position / duration).clamp(0., 1.) as f32,
-                                4.,
-                            ),
-                        ),
-                        2,
-                        ACCENT,
-                    );
-                }
-                let seek = ui.interact(
-                    progress.expand2(vec2(0., 8.)),
-                    Id::new("seek"),
-                    Sense::click_and_drag(),
-                );
-                if duration > 0. && (seek.hovered() || seek.dragged()) {
-                    let handle_x = progress.left()
-                        + progress.width() * (position / duration).clamp(0., 1.) as f32;
-                    p.rect_filled(
-                        Rect::from_center_size(pos2(handle_x, progress.center().y), vec2(8., 18.)),
-                        4,
-                        TEXT,
-                    );
-                    if let Some(pointer) = ui.ctx().pointer_hover_pos() {
-                        let time = crate::model::seek_time(
-                            pointer.x,
-                            progress.left(),
-                            progress.width(),
-                            duration,
-                        );
-                        let text = clock(time);
-                        let bubble = Rect::from_center_size(
-                            pos2(layout::seek_preview_x(r, pointer.x), progress.top() - 25.),
-                            vec2(54., 30.),
-                        );
-                        let preview = ui.ctx().layer_painter(egui::LayerId::new(
-                            egui::Order::Tooltip,
-                            Id::new("seek-preview"),
-                        ));
-                        preview.rect_filled(bubble, 6, Color32::WHITE);
-                        preview.text(
-                            bubble.center(),
-                            Align2::CENTER_CENTER,
-                            text,
-                            font(15., true),
-                            Color32::BLACK,
-                        );
-                    }
-                }
-                if (seek.clicked() || seek.dragged())
-                    && duration > 0.
-                    && let (Some(pos), Some(a)) = (seek.interact_pointer_pos(), &self.audio)
-                {
-                    a.seek(crate::model::seek_time(
-                        pos.x,
-                        progress.left(),
-                        progress.width(),
-                        duration,
-                    ));
-                }
+                let progress = layout::seek_rail(r);
+                let position = self.player_timeline(ui, r, progress, duration);
                 let track = self.current.clone();
                 let title_width = ui
                     .painter()
@@ -997,7 +1033,12 @@ impl App {
                 if let Some(cover) = layout.cover {
                     at(ui, cover, "player-cover", |ui| {
                         if self
-                            .cover(ui, track.as_ref().unwrap_or(&Track::default()), 68.)
+                            .cover_with_radius(
+                                ui,
+                                track.as_ref().unwrap_or(&Track::default()),
+                                68.,
+                                5,
+                            )
                             .clicked()
                         {
                             self.page = Page::Lyrics;
@@ -1089,38 +1130,52 @@ impl App {
                         .show(|ui| self.track_menu(ui, t, self.index, &menu_queue, None, false));
                 }
                 self.transport_controls(ui, layout.transport, layout.transport_center);
-                p.text(
-                    layout.time,
-                    Align2::CENTER_CENTER,
-                    format!("{} | {}", clock(position), clock(duration)),
-                    font(18., true),
-                    Color32::from_gray(142),
-                );
+                for (x, align, seconds) in [
+                    (progress.left() - 10., Align2::RIGHT_CENTER, position),
+                    (progress.right() + 10., Align2::LEFT_CENTER, duration),
+                ] {
+                    p.text(
+                        pos2(x, progress.center().y),
+                        align,
+                        clock(seconds),
+                        font(14., false),
+                        GREY,
+                    );
+                }
                 let quality = layout.quality;
                 if self.settings.show_quality {
-                    p.rect_filled(quality, 14, Color32::from_rgb(0, 50, 46));
-                    let format = self
+                    let (format, color) = self
                         .audio
                         .as_ref()
                         .map(|a| {
-                            format!(
-                                "{}-bit {:.1}kHz\n{}",
+                            let label = format!(
+                                "{}-bit {}",
                                 a.format.bit_depth,
-                                a.format.sample_rate as f64 / 1000.,
-                                if a.format.encoded_bitrate > 0 {
-                                    format!("{}kb/s", a.format.encoded_bitrate / 1000)
-                                } else {
-                                    a.format.codec.clone()
-                                }
-                            )
+                                playlist::sample_label(Some(a.format.sample_rate)),
+                            );
+                            let color = if a.format.bit_depth > 16 || a.format.sample_rate > 44_100
+                            {
+                                playlist::GOLD
+                            } else {
+                                ACCENT
+                            };
+                            (label, color)
                         })
-                        .unwrap_or_else(|| "Lossless\nReady".into());
+                        .unwrap_or_else(|| ("Audio quality".into(), GREY));
+                    p.rect_filled(quality, 26, Color32::from_gray(16));
+                    p.rect_filled(quality.shrink(6.), 21, color.gamma_multiply(0.075));
+                    p.rect_stroke(
+                        quality,
+                        26,
+                        Stroke::new(1_f32, Color32::BLACK),
+                        egui::StrokeKind::Inside,
+                    );
                     p.text(
                         quality.center(),
                         Align2::CENTER_CENTER,
                         format,
-                        font(16., true),
-                        ACCENT,
+                        font(15., false),
+                        color,
                     );
                     let quality_button = ui
                         .interact(quality, Id::new("quality"), Sense::click())
@@ -1129,7 +1184,7 @@ impl App {
                     self.signal_popover(ui, &quality_button);
                 }
                 for (i, (name, tip)) in [
-                    ("queue", "Queue"),
+                    ("queue", "Play queue"),
                     ("lyrics", "Lyrics"),
                     ("volume", "Volume · right-click to mute"),
                     ("float", "Floating lyrics"),
@@ -1144,7 +1199,7 @@ impl App {
                     if (name == "lyrics" && self.page == Page::Lyrics)
                         || (name == "queue" && self.queue_open)
                     {
-                        p.circle_filled(area.center(), 20., Color32::from_white_alpha(20));
+                        p.circle_filled(area.center(), 20., Color32::from_gray(52));
                     }
                     paint_icon(&p, area.shrink(6.), name, GREY);
                     let b = ui
@@ -1180,16 +1235,26 @@ impl App {
             });
     }
     fn player_glass(&mut self, painter: &egui::Painter, rect: Rect) {
-        painter.rect_filled(rect, 0, Color32::from_rgb(7, 8, 9));
+        if self.page == Page::Lyrics && self.settings.cover_theme {
+            painter.rect_filled(rect, 0, Color32::from_black_alpha(30));
+            return;
+        }
+        painter.rect_filled(rect, 0, design::CHROME);
+        painter.hline(
+            rect.x_range(),
+            rect.top(),
+            Stroke::new(1_f32, design::SEPARATOR),
+        );
+        if !self.settings.frosted_glass {
+            return;
+        }
         let art = self.current.as_ref().and_then(|track| {
             [640, 320, 160, 80]
                 .into_iter()
                 .filter_map(|side| artwork_key(track, side))
                 .find(|key| self.artwork.contains_key(key))
         });
-        if self.settings.frosted_glass
-            && let Some(art) = art.and_then(|key| self.artwork.get_mut(&key))
-        {
+        if let Some(art) = art.and_then(|key| self.artwork.get_mut(&key)) {
             art.touched = self.frame;
             // Reuse the worker's tiny preblurred texture. No per-frame screen readback,
             // Gaussian pass, extra image allocation or full-resolution framebuffer.
@@ -1199,13 +1264,13 @@ impl App {
                 Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
                 Color32::from_white_alpha((120. + self.settings.effect_strength * 135.) as u8),
             );
-            painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
+            painter.rect_filled(rect, 0, Color32::from_rgba_unmultiplied(29, 29, 29, 239));
             let mut shade = egui::Mesh::default();
             for (position, alpha) in [
                 (rect.left_top(), 0),
                 (rect.right_top(), 0),
-                (rect.left_bottom(), 65),
-                (rect.right_bottom(), 65),
+                (rect.left_bottom(), 22),
+                (rect.right_bottom(), 22),
             ] {
                 shade.colored_vertex(position, Color32::from_black_alpha(alpha));
             }
@@ -1259,7 +1324,12 @@ impl App {
         let size = cover.width();
         let current = self.current.clone().unwrap_or_default();
         at(ui, cover, "lyrics-cover", |ui| {
-            self.cover_with_radius(ui, &current, size, 12);
+            self.cover_with_radius(
+                ui,
+                &current,
+                size,
+                if self.settings.frosted_glass { 10 } else { 2 },
+            );
         });
         let lyrics_rect = layout.lines;
         let text_size = (self.settings.lyric_size * layout.font_scale * 2.).round() / 2.;
@@ -1351,7 +1421,7 @@ impl App {
                 // Keep enough trailing room to center even the final sung line.
                 *self.lyric_offsets.last().unwrap_or(&0.)
                     + if data.synced {
-                        lyrics_rect.height() * 0.62
+                        lyrics_rect.height() * 0.72
                     } else {
                         0.
                     },
@@ -1363,7 +1433,7 @@ impl App {
             }
             if data.synced && !self.lyric_manual_scroll {
                 let target = active
-                    .map(|i| (self.lyric_offsets[i] - lyrics_rect.height() * 0.38).max(0.))
+                    .map(|i| (self.lyric_offsets[i] - lyrics_rect.height() * 0.28).max(0.))
                     .unwrap_or(0.);
                 let dt = crate::lyrics::follow_step(
                     self.animation_clock.elapsed().as_secs_f32(),
@@ -1474,6 +1544,9 @@ impl App {
                         vec2(text_width, offsets[i + 1] - offsets[i]),
                     );
                     at(ui, area, ("line", i), |ui| {
+                        let edge_distance = (area.bottom() - lyrics_rect.top())
+                            .min(lyrics_rect.bottom() - area.top());
+                        ui.multiply_opacity(layout::ease(edge_distance / 108.));
                         let size = text_size;
                         let emphasis = if !data.synced {
                             1.
@@ -1490,7 +1563,7 @@ impl App {
                         };
                         let was_sung = active.is_some_and(|current| i < current);
                         let resting = if was_sung {
-                            Color32::from_white_alpha(210)
+                            Color32::from_white_alpha(180)
                         } else {
                             idle_color
                         };

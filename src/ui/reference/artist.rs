@@ -1,7 +1,7 @@
 use super::*;
 
 fn hero_height(width: f32) -> f32 {
-    (width * 0.54).clamp(500., 740.)
+    (width * 0.51).clamp(340., 710.)
 }
 fn inset(width: f32) -> f32 {
     (width * 0.047).clamp(28., 88.)
@@ -28,23 +28,6 @@ fn release_label(album: &Album, singles: bool) -> String {
     } else {
         format!("{} · {kind}", album.year)
     }
-}
-fn shade(p: &egui::Painter, rect: Rect, corners: [u8; 4]) {
-    let mut mesh = egui::Mesh::default();
-    for (point, alpha) in [
-        rect.left_top(),
-        rect.right_top(),
-        rect.left_bottom(),
-        rect.right_bottom(),
-    ]
-    .into_iter()
-    .zip(corners)
-    {
-        mesh.colored_vertex(point, Color32::from_black_alpha(alpha));
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(1, 3, 2);
-    p.add(egui::Shape::mesh(mesh));
 }
 fn circle_action(
     ui: &mut egui::Ui,
@@ -79,9 +62,9 @@ fn circle_action(
             r.center(),
             r.width() * 0.5,
             if primary {
-                Color32::WHITE
+                design::BRAND
             } else {
-                Color32::from_gray((19. + 12. * hover) as u8)
+                design::SURFACE.lerp_to_gamma(design::HOVER, hover)
             },
         );
     }
@@ -92,7 +75,7 @@ fn circle_action(
         if !enabled {
             Color32::from_gray(70)
         } else if primary {
-            Color32::BLACK
+            design::INK
         } else {
             TEXT
         },
@@ -182,7 +165,9 @@ impl App {
                     self.artists.remove(&id);
                 }
             } else {
-                label(ui, "Loading artist…", 24., true, GREY);
+                label(ui, "Loading artist…", design::SECTION, true, GREY);
+                ui.add_space(12.);
+                design::skeleton(ui, ui.available_width());
             }
             return;
         };
@@ -199,7 +184,8 @@ impl App {
         let output = scroll.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.;
             let width = ui.available_width();
-            let (hero, _) = ui.allocate_exact_size(vec2(width, hero_height(width)), Sense::hover());
+            let hero = hero_height(width).min((height * 0.84).max(300.));
+            let (hero, _) = ui.allocate_exact_size(vec2(width, hero), Sense::hover());
             self.artist_hero(ui, hero, &artist);
             let margin = inset(width);
             let body_width = width - margin * 2.;
@@ -221,12 +207,9 @@ impl App {
         });
         // Keep scrolled text and controls out from under the fixed navigation.
         let opacity = (output.state.offset.y / 120.).clamp(0., 1.);
-        let toolbar = Rect::from_min_size(room.min, vec2(room.width(), 76.));
-        ui.painter().rect_filled(
-            toolbar,
-            0,
-            Color32::from_black_alpha((opacity * 255.) as u8),
-        );
+        let toolbar = Rect::from_min_size(room.min, vec2(room.width(), design::TOOLBAR));
+        ui.painter()
+            .rect_filled(toolbar, 0, design::CANVAS.gamma_multiply(opacity));
         at(ui, toolbar, "artist-toolbar", |ui| {
             self.reference_toolbar(ui)
         });
@@ -239,7 +222,7 @@ impl App {
             cover: artist.picture.clone(),
             ..Default::default()
         };
-        let side = hero.height().min(hero.width() * 0.60);
+        let side = hero.height().min(hero.width() * 0.78);
         let photo = Rect::from_center_size(
             pos2(hero.center().x, hero.top() + side * 0.5),
             vec2(side, side),
@@ -249,7 +232,7 @@ impl App {
             .filter_map(|s| artwork_key(&portrait, s))
             .find(|k| self.artwork.contains_key(k));
         let p = ui.painter().clone();
-        p.rect_filled(hero, 0, Color32::from_rgb(16, 17, 18));
+        p.rect_filled(hero, 0, design::SIDEBAR);
         if self.settings.show_covers
             && let Some(art) = key.and_then(|key| self.artwork.get_mut(&key))
         {
@@ -258,35 +241,34 @@ impl App {
                 art.blur.id(),
                 hero,
                 Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
-                Color32::from_white_alpha(170),
+                Color32::from_white_alpha(90),
             );
         }
         at(ui, photo, ("artist-portrait", artist.id), |ui| {
             self.cover_image(ui, &portrait, side, 0, false);
         });
-        let half = hero.width() * 0.5;
+        let shade = |mesh: &mut egui::Mesh, left: Pos2, right: Pos2, opacity: u8| {
+            mesh.colored_vertex(left, Color32::from_black_alpha(opacity));
+            mesh.colored_vertex(right, Color32::from_black_alpha(opacity));
+        };
+        let mut fade = egui::Mesh::default();
         shade(
-            &p,
-            Rect::from_min_size(hero.min, vec2(half, hero.height())),
-            [85, 15, 250, 160],
+            &mut fade,
+            pos2(hero.left(), hero.top() + hero.height() * 0.32),
+            pos2(hero.right(), hero.top() + hero.height() * 0.32),
+            0,
         );
-        shade(
-            &p,
-            Rect::from_min_size(hero.min + vec2(half, 0.), vec2(half, hero.height())),
-            [15, 85, 160, 250],
-        );
-        shade(
-            &p,
-            Rect::from_min_max(hero.min + vec2(0., hero.height() * 0.48), hero.max),
-            [0, 0, 255, 255],
-        );
+        shade(&mut fade, hero.left_bottom(), hero.right_bottom(), 255);
+        fade.add_triangle(0, 1, 2);
+        fade.add_triangle(1, 3, 2);
+        p.add(egui::Shape::mesh(fade));
         let left = hero.left() + inset(hero.width());
         let name = Rect::from_min_max(
             pos2(left, hero.bottom() - 224.),
-            pos2(hero.right() - 28., hero.bottom() - 164.),
+            pos2((left + 500.).min(hero.right() - 24.), hero.bottom() - 164.),
         );
         at(ui, name, ("artist-name", artist.id), |ui| {
-            label(ui, &artist.name, 44., true, Color32::WHITE);
+            label(ui, &artist.name, 44., true, TEXT);
         });
         if let Some(fans) = artist.fans {
             p.text(
@@ -297,9 +279,14 @@ impl App {
                 Color32::from_gray(185),
             );
         }
-        let y = hero.bottom() - 70.;
-        let bounds =
-            |i: usize| Rect::from_center_size(pos2(left + 32. + i as f32 * 84., y), vec2(64., 64.));
+        let y = hero.bottom() - 44.;
+        let button_size = if hero.width() >= 760. { 64. } else { 54. };
+        let bounds = |i: usize| {
+            Rect::from_center_size(
+                pos2(left + button_size * 0.5 + i as f32 * (button_size + 20.), y),
+                Vec2::splat(button_size),
+            )
+        };
         if circle_action(
             ui,
             bounds(0),
@@ -607,9 +594,9 @@ impl App {
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
                     egui::Popup::menu(&add).show(|ui| {
                         ui.label("Add to playlist");
-                        for playlist in self.playlists.clone().into_iter().filter(|p| p.owned) {
+                        for playlist in self.playlists.clone().iter().filter(|p| p.owned) {
                             if ui.button(&playlist.title).clicked() {
-                                self.send(Command::Add(playlist.id, track.id));
+                                self.send(Command::Add(playlist.id.clone(), track.id));
                                 ui.close();
                             }
                         }

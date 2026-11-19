@@ -171,115 +171,39 @@ pub(super) fn outline_heart(p: &egui::Painter, rect: Rect, color: Color32) {
 }
 
 impl App {
-    pub(in crate::ui) fn playlist_background(&self, ctx: &egui::Context) {
+    pub(in crate::ui) fn playlist_background(&mut self, ctx: &egui::Context) {
         let rect = ctx.content_rect();
-        let p = ctx.layer_painter(egui::LayerId::background());
-        // Sampled from the supplied reference's unobstructed background. This is
-        // a small native gradient mesh, not a full-resolution blurred bitmap.
-        let colors = [
-            [[17, 37, 63], [60, 50, 60], [123, 78, 75]],
-            [[37, 65, 100], [73, 79, 90], [116, 91, 73]],
-            [[54, 75, 105], [70, 77, 77], [93, 85, 60]],
-            [[85, 70, 65], [52, 51, 40], [28, 42, 21]],
-        ];
-        let mut mesh = egui::Mesh::default();
-        for (y, row) in colors.iter().enumerate() {
-            for (x, rgb) in row.iter().enumerate() {
-                mesh.colored_vertex(
-                    rect.min + vec2(rect.width() * x as f32 / 2., rect.height() * y as f32 / 3.),
-                    Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
-                );
-            }
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        painter.rect_filled(rect, 0, design::CANVAS);
+        if !self.settings.playlist_background {
+            return;
         }
-        for y in 0..3 {
-            for x in 0..2 {
-                let a = (y * 3 + x) as u32;
-                mesh.add_triangle(a, a + 1, a + 3);
-                mesh.add_triangle(a + 1, a + 4, a + 3);
-            }
+        let Page::Playlist(id) = &self.page else {
+            return;
+        };
+        let Some(playlist) = self
+            .playlists
+            .iter()
+            .find(|item| item.id == *id)
+            .or_else(|| self.discovery.lists.get(id))
+        else {
+            return;
+        };
+        let cover = Track {
+            cover: playlist.image.clone(),
+            ..Default::default()
+        };
+        let art = [640, 320, 160, 80]
+            .into_iter()
+            .filter_map(|size| artwork_key(&cover, size))
+            .find(|key| self.artwork.contains_key(key));
+        if let Some(art) = art.and_then(|key| self.artwork.get_mut(&key)) {
+            art.touched = self.frame;
+            let tint = Color32::from_rgb(art.palette[0], art.palette[1], art.palette[2]);
+            painter.rect_filled(rect, 0, design::CANVAS.lerp_to_gamma(tint, 0.14));
         }
-        p.add(egui::Shape::mesh(mesh));
     }
-    pub(in crate::ui) fn playlist_toolbar(&mut self, ui: &mut egui::Ui) {
-        let s = (ui.available_width() / 1800.).clamp(0.9, 1.1);
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 76. * s), Sense::hover());
-        let arrows = Rect::from_min_size(r.min + vec2(20. * s, 16. * s), vec2(84. * s, 44. * s));
-        ui.painter()
-            .rect_filled(arrows, 24, Color32::from_black_alpha(40));
-        for (name, x) in [
-            ("back", arrows.left() + 24. * s),
-            ("forward", arrows.right() - 24. * s),
-        ] {
-            let rect = Rect::from_center_size(pos2(x, arrows.center().y), vec2(29. * s, 29. * s));
-            let enabled = if name == "back" {
-                !self.back_history.is_empty()
-            } else {
-                !self.forward_history.is_empty()
-            };
-            paint_icon(
-                ui.painter(),
-                rect,
-                name,
-                if enabled {
-                    TEXT
-                } else {
-                    Color32::from_white_alpha(50)
-                },
-            );
-            if ui
-                .interact(rect, Id::new(("playlist-history", name)), Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                if name == "back" {
-                    if let Some(page) = self.back_history.pop() {
-                        self.forward_history.push(self.page.clone());
-                        self.page = page.clone();
-                        self.history_page = page;
-                    }
-                } else if let Some(page) = self.forward_history.pop() {
-                    self.back_history.push(self.page.clone());
-                    self.page = page.clone();
-                    self.history_page = page;
-                }
-            }
-        }
-        let avatar = Rect::from_center_size(
-            pos2(r.right() - 35. * s, r.top() + 37. * s),
-            vec2(42. * s, 42. * s),
-        );
-        self.profile_button(ui, avatar);
-        let search = Rect::from_min_size(
-            pos2(avatar.left() - 24. * s - 336. * s, r.top() + 15. * s),
-            vec2(336. * s, 44. * s),
-        );
-        ui.painter()
-            .rect_filled(search, 24, Color32::from_black_alpha(110));
-        paint_icon(
-            ui.painter(),
-            Rect::from_min_size(search.min + vec2(13. * s, 11. * s), vec2(23. * s, 23. * s)),
-            "search",
-            GREY,
-        );
-        at(
-            ui,
-            Rect::from_min_max(
-                search.min + vec2(52. * s, 7. * s),
-                search.max - vec2(42. * s, 6. * s),
-            ),
-            "playlist-global-search",
-            |ui| {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.query)
-                        .font(font(18. * s, false))
-                        .hint_text("Search")
-                        .frame(false)
-                        .desired_width(f32::INFINITY),
-                );
-                self.search_input_response(ui, &response, search);
-            },
-        );
-    }
+
     pub(super) fn rebuild_playlist_filter(&mut self, tracks: &Arc<Vec<Track>>) {
         self.playlist_filtered =
             self.playlist_index
@@ -323,7 +247,8 @@ impl App {
         }
     }
     pub(in crate::ui) fn reference_playlist(&mut self, ui: &mut egui::Ui, playlist: &Playlist) {
-        let s = (ui.available_width() / 1800.).clamp(0.9, 1.1);
+        let compact = ui.ctx().content_rect().height() < 700.;
+        let s = (ui.available_width() / 1800.).clamp(0.9, 1.1) * if compact { 0.78 } else { 1. };
         let tracks = self.tracks.get(&playlist.id).cloned().unwrap_or_default();
         if self.playlist_filter_id != playlist.id {
             self.playlist_filter_id = playlist.id.clone();
@@ -340,16 +265,24 @@ impl App {
             ui.spacing_mut().item_spacing.y = 0.;
             ui.add_space(20. * s);
             let (hero, _) =
-                ui.allocate_exact_size(vec2(ui.available_width(), 288. * s), Sense::hover());
-            let cover = Rect::from_min_size(hero.min, vec2(288. * s, 288. * s));
+                ui.allocate_exact_size(vec2(ui.available_width(), 248. * s), Sense::hover());
+            let side = (hero.width() * 0.32).clamp(146., hero.height());
+            let cover = Rect::from_min_size(hero.min, vec2(side, side));
             let art = Track {
                 cover: playlist.image.clone(),
                 ..Default::default()
             };
             at(ui, cover, "playlist-hero-cover", |ui| {
-                self.cover(ui, &art, 288. * s);
+                self.cover_with_radius(ui, &art, side, design::ART);
             });
-            let text_x = cover.right() + 38. * s;
+            let text_x = cover.right() + 28. * s;
+            ui.painter().text(
+                pos2(text_x, hero.top() + 20. * s),
+                Align2::LEFT_TOP,
+                "Playlist",
+                font(14., true),
+                design::BRAND,
+            );
             let title = Rect::from_min_max(
                 pos2(text_x, hero.top() + 50. * s),
                 pos2(hero.right(), hero.top() + 108. * s),
@@ -469,7 +402,7 @@ impl App {
                 font(14. * s, true),
                 Color32::from_rgb(188, 198, 211),
             );
-            ui.add_space(58. * s);
+            ui.add_space(if compact { 12. } else { 28. * s });
             let (actions, _) = ui.allocate_exact_size(
                 vec2(
                     ui.available_width(),
@@ -483,26 +416,16 @@ impl App {
             );
             let secondary_top = actions.top() + if actions.width() < 850. { 72. * s } else { 0. };
             for (name, x, width, fill, glyph) in [
-                ("Play", 0., 193., Color32::WHITE, "play"),
-                (
-                    "Shuffle",
-                    213.,
-                    193.,
-                    Color32::from_white_alpha(24),
-                    "shuffle",
-                ),
+                ("Play", 0., 193., design::BRAND, "play"),
+                ("Shuffle", 213., 193., design::SURFACE, "shuffle"),
             ] {
                 let r =
                     Rect::from_min_size(actions.min + vec2(x * s, 0.), vec2(width * s, 58. * s));
-                ui.painter().rect_filled(r, 32, fill);
+                ui.painter().rect_filled(r, design::CONTROL, fill);
                 let response = ui
                     .interact(r, Id::new(("playlist-action", name)), Sense::click())
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
-                let color = if name == "Play" {
-                    Color32::from_rgb(17, 19, 22)
-                } else {
-                    TEXT
-                };
+                let color = if name == "Play" { design::INK } else { TEXT };
                 labeled_control(ui.painter(), r, glyph, name, 21. * s, color);
                 if response.clicked() && !tracks.is_empty() {
                     let mut selection = self

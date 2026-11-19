@@ -18,15 +18,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod design;
 mod diagnostics;
 mod lyric_jump;
 mod reference;
 
-const TEXT: Color32 = Color32::from_rgb(240, 243, 245);
-const MUTED: Color32 = Color32::from_rgb(142, 153, 163);
+const TEXT: Color32 = design::TEXT;
+const MUTED: Color32 = design::MUTED;
 const ACCENT: Color32 = Color32::from_rgb(35, 225, 203);
-const BG: Color32 = Color32::from_rgb(9, 13, 18);
-const CARD: Color32 = Color32::from_rgba_premultiplied(22, 29, 36, 240);
+const BG: Color32 = design::CANVAS;
+const CARD: Color32 = design::SURFACE;
 
 #[derive(Clone, PartialEq)]
 enum Page {
@@ -101,7 +102,7 @@ pub struct App {
     settings: Settings,
     worker: Worker,
     page: Page,
-    playlists: Vec<Playlist>,
+    playlists: Arc<Vec<Playlist>>,
     tracks: HashMap<String, Arc<Vec<Track>>>,
     favorite_ids: HashSet<u64>,
     queue: Arc<Vec<Track>>,
@@ -333,11 +334,9 @@ fn trim_artwork_cache(
     }
 }
 
-const ACCENT_HOVER: Color32 = Color32::from_rgb(98, 240, 222);
-const ON_ACCENT: Color32 = Color32::from_rgb(4, 30, 28);
-const BUTTON: Color32 = Color32::from_rgb(31, 31, 35);
-const BUTTON_HOVER: Color32 = Color32::from_rgb(44, 44, 49);
-const PANEL: Color32 = Color32::from_rgb(24, 24, 27);
+const BUTTON: Color32 = design::SURFACE;
+const BUTTON_HOVER: Color32 = design::HOVER;
+const PANEL: Color32 = design::POPOVER;
 
 fn pill(ui: &mut egui::Ui, text: impl Into<String>, active: bool) -> egui::Response {
     pill_sized(ui, text, active, 36.0, 15.0)
@@ -346,8 +345,7 @@ fn small_pill(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     pill_sized(ui, text, false, 28.0, 13.0)
 }
 // Painted by hand so hover and press are eased by elapsed time (frame-rate
-// independent) and the button matches the teal-on-dark theme rather than egui's
-// stock widget look. `active` is the primary (accent-filled) variant.
+// independent). `active` selects the white primary variant.
 fn pill_sized(
     ui: &mut egui::Ui,
     text: impl Into<String>,
@@ -374,33 +372,33 @@ fn pill_sized(
     let press = response.is_pointer_button_down_on();
     let (fill, border, ink) = if active {
         (
-            ACCENT.lerp_to_gamma(ACCENT_HOVER, hover),
+            design::BRAND.lerp_to_gamma(Color32::from_gray(224), hover),
             Color32::TRANSPARENT,
-            ON_ACCENT,
+            design::INK,
         )
     } else {
         (
             BUTTON.lerp_to_gamma(BUTTON_HOVER, hover),
-            Color32::from_white_alpha(16).lerp_to_gamma(ACCENT.gamma_multiply(0.5), hover),
+            Color32::TRANSPARENT,
             TEXT,
         )
     };
     let body = rect.expand(if press { -1.5 } else { hover * 0.8 });
-    if response.has_focus() || response.hovered() {
-        ui.painter().rect_filled(
-            body.expand(3.0),
-            body.height() * 0.5 + 3.0,
-            ACCENT.gamma_multiply(if active { 0.16 * hover } else { 0.10 * hover }),
-        );
-    }
     ui.painter().rect_filled(body, body.height() * 0.5, fill);
     ui.painter().rect_stroke(
         body,
         body.height() * 0.5,
-        Stroke::new(1.0_f32, border),
+        Stroke::new(
+            1.0_f32,
+            if response.has_focus() {
+                design::MUTED
+            } else {
+                border
+            },
+        ),
         egui::StrokeKind::Inside,
     );
-    ui.painter().galley(
+    ui.painter().galley_with_override_text_color(
         body.center() - galley.size() * 0.5,
         galley,
         if ui.is_enabled() { ink } else { MUTED },
@@ -548,22 +546,9 @@ fn paint_lyric_galley(
 ) {
     let galley = galley.into();
     if let Some(glow) = glow {
-        // Two tinted rings (tight and wide) in eight draws rather than twelve; the
-        // wide ring reaches farther so the halo reads as colored light, not an outline.
-        for (off, alpha) in [
-            (vec2(-3., 0.), 54),
-            (vec2(3., 0.), 54),
-            (vec2(0., -3.), 54),
-            (vec2(0., 3.), 54),
-            (vec2(-6., -5.), 28),
-            (vec2(6., -5.), 28),
-            (vec2(-6., 5.), 28),
-            (vec2(6., 5.), 28),
-        ] {
-            galley.paint(painter, origin + off, {
-                let [r, g, b, a] = glow.to_srgba_unmultiplied();
-                Color32::from_rgba_unmultiplied(r, g, b, (alpha as u16 * a as u16 / 255) as u8)
-            });
+        let glow = glow.gamma_multiply(0.125);
+        for offset in [vec2(-2., 0.), vec2(2., 0.), vec2(0., -2.), vec2(0., 2.)] {
+            galley.paint(painter, origin + offset, glow);
         }
     }
     galley.paint(painter, origin, color);
@@ -572,6 +557,15 @@ fn paint_lyric_galley(
 impl App {
     pub fn new(ctx: &egui::Context, args: &[String]) -> Self {
         let mut settings = Settings::load();
+        if args.iter().any(|arg| arg == "--background-benchmark")
+            && let Some(scale) = args
+                .windows(2)
+                .find(|pair| pair[0] == "--preview-scale")
+                .and_then(|pair| pair[1].parse::<f32>().ok())
+                .filter(|scale| (1. ..=2.).contains(scale))
+        {
+            ctx.set_zoom_factor(scale);
+        }
         if let Some(i) = args.iter().position(|a| a == "--fps")
             && let Some(fps) = args.get(i + 1).and_then(|s| s.parse::<u32>().ok())
         {
@@ -646,8 +640,9 @@ impl App {
             } else {
                 Page::Home
             },
-            playlists: crate::config::read_json(&data_dir().join("playlists.json"))
-                .unwrap_or_default(),
+            playlists: Arc::new(
+                crate::config::read_json(&data_dir().join("playlists.json")).unwrap_or_default(),
+            ),
             tracks: HashMap::new(),
             favorite_ids: HashSet::new(),
             queue: Arc::new(Vec::new()),
@@ -1231,7 +1226,7 @@ impl App {
                     self.artists.clear();
                     self.artist_access.clear();
                     self.artists_pending.clear();
-                    self.playlists.clear();
+                    self.playlists = Arc::default();
                     self.tracks.clear();
                     self.playlist_index.invalidate();
                     self.discovery = Default::default();
@@ -1249,7 +1244,7 @@ impl App {
                     self.collection
                         .retain(|k| k.starts_with("album:") || k.starts_with("artist:"));
                     self.collection.extend(p.iter().map(|p| p.id.clone()));
-                    self.playlists = p;
+                    self.playlists = Arc::new(p);
                     self.busy = false;
                     self.last_sync = Instant::now();
                     if let Some(id) = self.startup_artist.take() {
@@ -1796,8 +1791,8 @@ impl App {
                 f32::INFINITY,
             );
             let sidebar = if self.settings.show_sidebar {
-                if self.settings.sidebar_collapsed || ctx.content_rect().width() < 1100. {
-                    76.
+                if self.settings.sidebar_collapsed || ctx.content_rect().width() < 980. {
+                    68.
                 } else {
                     self.sidebar_expanded_width
                 }
@@ -2097,6 +2092,7 @@ impl App {
                                 | Page::Album(..)
                                 | Page::Artist(_)
                                 | Page::Search
+                                | Page::Settings
                         ) {
                             0
                         } else {
@@ -2107,7 +2103,9 @@ impl App {
             )
             .show(ctx, |ui| {
                 let mut screen = ui.max_rect();
-                screen.max.x -= 12.; // Keep scrollbars clear of the window resize border.
+                if self.page != Page::Lyrics {
+                    screen.max.x -= 12.; // Keep scrollbars clear of the window resize border.
+                }
                 let offset = if self.page == Page::Lyrics {
                     vec2(0., 36. * (1. - eased))
                 } else {
@@ -2120,10 +2118,31 @@ impl App {
                 );
                 content.set_clip_rect(screen.intersect(ui.clip_rect()));
                 content.set_opacity(0.45 + 0.55 * eased);
-                let ui = &mut content;
-                if self.page != Page::Lyrics && !matches!(self.page, Page::Artist(_)) {
-                    self.toolbar(ui);
+                if !matches!(self.page, Page::Lyrics | Page::Artist(_) | Page::Album(..)) {
+                    self.toolbar(&mut content);
                 }
+                let mut docked;
+                let window = ctx.content_rect();
+                let ui = if self.queue_open
+                    && self.page != Page::Lyrics
+                    && reference::layout::queue_docked(window)
+                {
+                    let mut work = content.available_rect_before_wrap();
+                    let queue = reference::layout::queue_rect(
+                        window,
+                        reference::layout::reserved_player(ctx),
+                    );
+                    work.max.x = work.right().min(queue.left() - 12.);
+                    docked = content.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("queue-docked-content")
+                            .max_rect(work),
+                    );
+                    docked.set_clip_rect(work.intersect(content.clip_rect()));
+                    &mut docked
+                } else {
+                    &mut content
+                };
                 match self.page.clone() {
                     Page::Home => self.home_viewport(ui),
                     Page::Discovery(id) => self.reference_discovery(ui, &id),
@@ -2365,14 +2384,14 @@ fn style(ctx: &egui::Context) {
     s.visuals.panel_fill = BG;
     s.visuals.window_fill = PANEL;
     s.visuals.window_stroke = Stroke::new(1.0_f32, Color32::from_white_alpha(22));
-    s.visuals.extreme_bg_color = Color32::from_rgb(24, 24, 27);
-    s.visuals.faint_bg_color = Color32::from_rgb(18, 25, 31);
-    s.visuals.hyperlink_color = ACCENT;
+    s.visuals.extreme_bg_color = design::SURFACE;
+    s.visuals.faint_bg_color = design::SIDEBAR;
+    s.visuals.hyperlink_color = design::BRAND;
     s.visuals.widgets.noninteractive.bg_stroke =
         Stroke::new(1.0_f32, Color32::from_white_alpha(14));
     // Every stock widget (ui.button, selectable labels, combo boxes, checkboxes,
     // sliders) picks these up, so buttons without a custom painter still match.
-    let radius = egui::CornerRadius::same(12);
+    let radius = egui::CornerRadius::same(design::CONTROL);
     let widgets = &mut s.visuals.widgets;
     for w in [
         &mut widgets.inactive,
@@ -2383,23 +2402,23 @@ fn style(ctx: &egui::Context) {
         w.corner_radius = radius;
     }
     widgets.inactive.weak_bg_fill = BUTTON;
-    widgets.inactive.bg_fill = Color32::from_rgb(36, 36, 40);
+    widgets.inactive.bg_fill = design::SURFACE;
     widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_white_alpha(16));
     widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     widgets.hovered.weak_bg_fill = BUTTON_HOVER;
-    widgets.hovered.bg_fill = Color32::from_rgb(48, 48, 53);
-    widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_gray(135));
+    widgets.hovered.bg_fill = design::HOVER;
+    widgets.hovered.bg_stroke = Stroke::new(1.0_f32, design::BRAND.gamma_multiply(0.6));
     widgets.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
-    widgets.hovered.expansion = 1.0;
-    widgets.active.weak_bg_fill = Color32::from_rgb(16, 104, 96);
-    widgets.active.bg_fill = ACCENT;
-    widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    widgets.hovered.expansion = 0.;
+    widgets.active.weak_bg_fill = design::SELECTED;
+    widgets.active.bg_fill = design::SELECTED;
+    widgets.active.bg_stroke = Stroke::new(1.0_f32, design::BRAND);
     widgets.active.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
     widgets.active.expansion = 0.0;
     widgets.open.weak_bg_fill = BUTTON_HOVER;
     widgets.open.bg_stroke = Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.55));
-    s.visuals.selection.bg_fill = Color32::from_rgb(14, 87, 81);
-    s.visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
+    s.visuals.selection.bg_fill = design::SELECTED;
+    s.visuals.selection.stroke = Stroke::new(1.0_f32, design::BRAND);
     s.visuals.text_cursor.stroke = Stroke::new(2.0_f32, Color32::WHITE);
     s.interaction.selectable_labels = false;
     s.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
@@ -2407,8 +2426,8 @@ fn style(ctx: &egui::Context) {
     s.spacing.button_padding = vec2(16., 8.);
     s.spacing.slider_width = 100.;
     s.spacing.scroll = egui::style::ScrollStyle::floating();
-    s.visuals.window_corner_radius = 20.into();
-    s.visuals.menu_corner_radius = 12.into();
+    s.visuals.window_corner_radius = design::PANEL.into();
+    s.visuals.menu_corner_radius = design::CONTROL.into();
     s.visuals.popup_shadow = egui::epaint::Shadow {
         offset: [0, 10],
         blur: 32,
@@ -2424,13 +2443,9 @@ fn system_font(file: &str) -> Option<&'static [u8]> {
     use std::sync::OnceLock;
     type FontBytes = OnceLock<Option<crate::font_data::FontBytes>>;
     static REGULAR: FontBytes = OnceLock::new();
-    static MEDIUM: FontBytes = OnceLock::new();
-    static BOLD: FontBytes = OnceLock::new();
     static CJK: FontBytes = OnceLock::new();
     let slot = match file {
         "segoeui.ttf" => &REGULAR,
-        "seguisb.ttf" => &MEDIUM,
-        "segoeuib.ttf" => &BOLD,
         "cjk" => &CJK,
         _ => return None,
     };
@@ -2450,16 +2465,9 @@ fn system_font(file: &str) -> Option<&'static [u8]> {
 }
 
 pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {
-    let path = if path.is_empty() {
-        "C:\\Windows\\Fonts\\segoeui.ttf"
-    } else {
-        path
-    };
-    let font_data = if path == "C:\\Windows\\Fonts\\segoeui.ttf" {
-        let Some(bytes) = system_font("segoeui.ttf") else {
-            return false;
-        };
-        egui::FontData::from_static(bytes)
+    let use_default = path.is_empty();
+    let font_data = if use_default {
+        egui::FontData::from_static(include_bytes!("../assets/tidal-ui/nationale-regular.ttf"))
     } else {
         let Ok(meta) = std::fs::metadata(path) else {
             return false;
@@ -2482,6 +2490,17 @@ pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {
         .entry(egui::FontFamily::Proportional)
         .or_default()
         .insert(0, "user".into());
+    if let Some(bytes) = system_font("segoeui.ttf") {
+        fonts.font_data.insert(
+            "system-ui".into(),
+            egui::FontData::from_static(bytes).into(),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .push("system-ui".into());
+    }
     // One installed fallback covers Japanese, Korean and common CJK characters.
     // Share its data across styles and avoid loading multiple large CJK files.
     if let Some(bytes) = system_font("cjk") {
@@ -2495,19 +2514,23 @@ pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {
             .push("cjk".into());
     }
     let fallbacks = fonts.families[&egui::FontFamily::Proportional].clone();
-    for (family, key, file) in [
-        ("Medium", "medium", "seguisb.ttf"),
-        ("Bold", "bold", "segoeuib.ttf"),
+    for (family, key, bytes) in [
+        (
+            "Medium",
+            "medium",
+            include_bytes!("../assets/tidal-ui/nationale-medium.ttf").as_slice(),
+        ),
+        (
+            "Bold",
+            "bold",
+            include_bytes!("../assets/tidal-ui/nationale-demibold.ttf").as_slice(),
+        ),
     ] {
-        let font_key = if path == "C:\\Windows\\Fonts\\segoeui.ttf" {
-            if let Some(bytes) = system_font(file) {
-                fonts
-                    .font_data
-                    .insert(key.into(), egui::FontData::from_static(bytes).into());
-                key
-            } else {
-                "user"
-            }
+        let font_key = if use_default {
+            fonts
+                .font_data
+                .insert(key.into(), egui::FontData::from_static(bytes).into());
+            key
         } else {
             "user"
         };
@@ -2528,6 +2551,22 @@ pub(crate) fn load_font(ctx: &egui::Context, path: &str) -> bool {
 
 #[cfg(test)]
 mod performance_tests {
+    #[test]
+    fn white_primary_button_paints_dark_text() {
+        use eframe::egui;
+        let ctx = egui::Context::default();
+        assert!(super::load_font(&ctx, ""));
+        let frame = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::pill(ui, "Top results", true);
+            });
+        });
+        assert!(frame.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text)
+                if text.override_text_color == Some(super::design::INK))
+        }));
+    }
+
     #[test]
     fn retained_word_layouts_preserve_wrap_clip_glow_and_hit_rectangles() {
         use eframe::egui::*;

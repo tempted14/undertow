@@ -6,12 +6,12 @@ impl App {
         let margin = (ui.available_width() * 0.045).clamp(28., 64.);
         super::catalog::catalog_canvas(ui, "favorites-body", margin, 350., |ui| {
             ui.add_space(22.);
-            label(ui, "Tracks", 34., true, TEXT);
-            ui.add_space(36.);
+            label(ui, "Tracks", design::TITLE, true, TEXT);
+            ui.add_space(22.);
             let (actions, _) =
                 ui.allocate_exact_size(vec2(ui.available_width(), 64.), Sense::hover());
             self.large_play_actions(ui, actions, &tracks);
-            ui.add_space(38.);
+            ui.add_space(22.);
             if self.playlist_filter_id != "favorites" {
                 self.playlist_filter_id = "favorites".into();
                 self.playlist_filter.clear();
@@ -38,7 +38,7 @@ impl App {
             if !self.playlist_filter.trim().is_empty() {
                 forms::filter_summary(ui, filter, self.playlist_filtered.len(), tracks.len());
             }
-            ui.add_space(54.);
+            ui.add_space(22.);
             if tracks.is_empty() {
                 label(
                     ui,

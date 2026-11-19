@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-18
+
+- Align the Windows desktop layout, typography, and controls with the installed TIDAL 2.48.0 reference. Keep the native Rust renderer, Undertow branding, and plugin controls.
+- Refine the Music shelves, search suggestions, album and artist headers, settings, playlist dialog, docked queue, and synchronized lyrics.
+- Preview the position during scrubbing and seek once on release. Hold the new position during decoder preparation and isolate end-of-stream markers by seek generation.
+- Bundle the authorized Nationale faces and include them in the buildable source archive.
+- Add regression checks for scrubbing, playback completion during a seek, responsive control placement, and primary-button contrast.
+
 ## 0.2.2 — 2026-11-17
 
 - Copy decoded PCM spans into the bounded packet pool and preserve exact per-sample clocks with one fewer locked counter update.

@@ -25,6 +25,11 @@ impl App {
             let _ = std::fs::copy(source, path);
         }
         let cover = format!("local-playlist:{cover_id}");
+        if matches!(screen.as_str(), "search" | "search-preview") {
+            for item in Arc::make_mut(&mut self.catalog) {
+                item.cover.clone_from(&cover);
+            }
+        }
         let album = Album {
             id: 20,
             title: "Evening Sessions".into(),
@@ -55,9 +60,18 @@ impl App {
         let items = |kind: &str| {
             (0..12).map(|i|serde_json::json!({"type":kind,"data":{"id":20+i,"title":format!("Evening Sessions {}",i+1),"name":format!("Northbound {}",i+1),"cover":cover,"picture":cover,"artists":[{"name":"Northbound"}]}})).collect::<Vec<_>>()
         };
+        let shortcuts = serde_json::json!([
+            {"type":"DEEP_LINK","data":{"url":"tidal://my-collection/tracks","title":"My Tracks"}},
+            {"type":"ARTIST","data":{"id":10,"name":"Northbound","picture":cover}},
+            {"type":"PLAYLIST","data":{"uuid":"preview-playlist","title":"Evening rotation","squareImage":cover,"creator":{"name":"Example"}}},
+            {"type":"ALBUM","data":{"id":20,"title":"Evening Sessions","cover":cover,"artists":[{"name":"Northbound"}]}},
+            {"type":"ARTIST","data":{"id":11,"name":"Stillwater","picture":cover}},
+            {"type":"ALBUM","data":{"id":21,"title":"Harbor Lights","cover":cover,"artists":[{"name":"Stillwater"}]}}
+        ]);
         self.discovery.home_result(Ok(crate::discovery::feed(&serde_json::json!({"items":[
-            {"type":"SHORTCUT_LIST","moduleId":"shortcuts","title":"Shortcuts","items":[{"type":"DEEP_LINK","data":{"url":"tidal://my-collection/tracks","title":"My Tracks"}},{"type":"PLAYLIST","data":{"uuid":"preview-playlist","title":"Evening rotation","squareImage":cover,"creator":{"name":"Example"}}}]},
+            {"type":"SHORTCUT_LIST","moduleId":"shortcuts","title":"Shortcuts","items":shortcuts},
             {"type":"HORIZONTAL_LIST","moduleId":"albums","title":"Albums you’ll enjoy","items":items("ALBUM")},
+            {"type":"HORIZONTAL_LIST","moduleId":"CONTINUE_LISTEN_TO","title":"Recently played","items":shortcuts},
             {"type":"HORIZONTAL_LIST","moduleId":"artists","title":"Artists to explore","items":items("ARTIST")}
         ]}))));
         self.settings.profile_name = "Example listener".into();
@@ -272,7 +286,7 @@ impl App {
         self.tracks.insert("favorites".into(), tracks.clone());
         self.tracks
             .insert("preview-playlist".into(), tracks.clone());
-        self.playlists = vec![Playlist {
+        self.playlists = Arc::new(vec![Playlist {
             id: "preview-playlist".into(),
             title: "Evening rotation".into(),
             description: "Generated UI fixture — no account or service writes.".into(),
@@ -282,7 +296,7 @@ impl App {
             owned: true,
             creator: "Undertow preview".into(),
             public: Some(false),
-        }];
+        }]);
         self.connected = true;
         self.account = "Local preview fixture".into();
         self.page = if args.iter().any(|a| a == "--preview-home") {

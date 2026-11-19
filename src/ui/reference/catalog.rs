@@ -153,7 +153,7 @@ impl App {
         index: usize,
     ) {
         let art_size = if compact { 62. } else { 84. };
-        let height = if compact { 88. } else { 110. };
+        let height = if compact { 95. } else { 110. };
         let (r, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
         if !ui.is_rect_visible(r) {
@@ -167,7 +167,10 @@ impl App {
             cover: item.cover.clone(),
             ..Default::default()
         };
-        let cover = Rect::from_min_size(r.min + vec2(10., 9.), vec2(art_size, art_size));
+        let cover = Rect::from_min_size(
+            pos2(r.left() + 10., r.center().y - art_size * 0.5),
+            vec2(art_size, art_size),
+        );
         let art_response = at(ui, cover, ("catalog-art", compact, index), |ui| {
             self.cover_with_radius(
                 ui,
@@ -276,9 +279,9 @@ impl App {
         let Some(anchor) = self.search_anchor else {
             return;
         };
-        let width = 520_f32.min(ctx.content_rect().width() - 24.);
+        let width = 526_f32.min(ctx.content_rect().width() - 24.);
         let left = (anchor.right() - width).max(12.);
-        let top = anchor.bottom() + 12.;
+        let top = anchor.bottom() + 24.;
         let preview_height =
             (ctx.content_rect().bottom() - top - reserved_player(ctx) - 30.).max(160.);
         let mut bounds = Rect::NOTHING;
@@ -289,27 +292,26 @@ impl App {
             .fixed_pos(pos2(left, top))
             .show(ctx, |ui| {
                 let response = Frame::new()
-                    .fill(Color32::from_rgb(23, 24, 27))
+                    .fill(Color32::from_gray(24))
                     .stroke(Stroke::new(1_f32, Color32::from_white_alpha(32)))
                     .corner_radius(15)
                     .inner_margin(14)
                     .show(ui, |ui| {
                         ui.set_width(width - 28.);
-                        ui.set_height(preview_height - 28.);
                         ui.spacing_mut().item_spacing.y = 0.;
                         egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .max_height(
-                                (ctx.content_rect().bottom() - top - reserved_player(ctx) - 30.)
-                                    .max(120.),
-                            )
+                            .auto_shrink([false, true])
+                            .max_height(preview_height - 28.)
                             .show(ui, |ui| {
                                 if ui
                                     .add_sized(
                                         [ui.available_width(), 54.],
                                         egui::Button::new(
-                                            RichText::new(format!("Search for “{}”", self.query))
-                                                .size(18.),
+                                            RichText::new(format!(
+                                                "View all results for {}",
+                                                self.query
+                                            ))
+                                            .size(18.),
                                         )
                                         .frame(false),
                                     )
@@ -353,32 +355,16 @@ impl App {
         at(ui, r, "catalog-results", |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.;
-                for tab in ["Top results", "Profiles", "Albums", "Tracks", "Playlists"] {
+                for tab in ["Top results", "Albums", "Playlists", "Tracks", "Profiles"] {
                     let active = self.search_tab == tab;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(tab).font(font(18., true)).color(if active {
-                                    Color32::BLACK
-                                } else {
-                                    TEXT
-                                }),
-                            )
-                            .fill(if active {
-                                Color32::WHITE
-                            } else {
-                                Color32::from_gray(19)
-                            })
-                            .corner_radius(28)
-                            .min_size(vec2(104., 52.)),
-                        )
-                        .clicked()
-                    {
+                    if pill_sized(ui, tab, active, 52., 17.).clicked() {
                         self.search_tab = tab.into();
                     }
                 }
             });
-            ui.add_space(26.);
+            ui.add_space(22.);
+            ui.separator();
+            ui.add_space(12.);
             let result_count = self
                 .catalog_view
                 .get(&self.catalog, &self.search_tab, self.search_sort)
@@ -400,7 +386,9 @@ impl App {
             });
             ui.add_space(20.);
             if self.catalog_query != self.query {
-                label(ui, "Searching TIDAL…", 18., false, GREY);
+                label(ui, "Searching…", 16., false, GREY);
+                ui.add_space(12.);
+                design::skeleton(ui, ui.available_width());
                 return;
             }
             let items = self.catalog.clone();

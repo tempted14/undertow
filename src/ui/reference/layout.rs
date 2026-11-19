@@ -2,7 +2,7 @@
 use super::*;
 
 pub(super) fn player_height(width: f32) -> f32 {
-    if width < 1200. { 180. } else { 116. }
+    if width < 1200. { 160. } else { 118. }
 }
 
 pub(in crate::ui) fn reserved_player(ctx: &egui::Context) -> f32 {
@@ -16,6 +16,27 @@ pub(super) fn player_rect(screen: Rect) -> Rect {
             screen.bottom() - player_height(screen.width()),
         ),
         screen.right_bottom(),
+    )
+}
+
+fn transport_center(player: Rect) -> f32 {
+    let center = player.center().x;
+    if player.height() > 140. {
+        center.min(player.right() - 407.)
+    } else {
+        center
+    }
+}
+
+pub(super) fn seek_rail(player: Rect) -> Rect {
+    let stacked = player.height() > 140.;
+    let width = (player.width() * if stacked { 0.40 } else { 0.347 }).clamp(1., 820.);
+    Rect::from_center_size(
+        pos2(
+            transport_center(player),
+            player.top() + if stacked { 142. } else { 90. },
+        ),
+        vec2(width, 4.),
     )
 }
 
@@ -41,11 +62,20 @@ pub(super) fn columns(width: f32, minimum: f32, gap: f32, maximum: usize) -> usi
 pub(in crate::ui) fn queue_rect(screen: Rect, footer: f32) -> Rect {
     Rect::from_min_max(
         pos2(
-            (screen.right() - 454.).max(screen.left() + 16.),
-            screen.top() + 44.,
+            (screen.right() - 450.).max(screen.left() + 16.),
+            screen.top()
+                + if screen.height() < 700. {
+                    78.
+                } else {
+                    design::TITLE_BAR + design::TOOLBAR
+                },
         ),
-        pos2(screen.right() - 12., screen.bottom() - footer - 12.),
+        pos2(screen.right() - 12., screen.bottom() - footer - 24.),
     )
+}
+
+pub(in crate::ui) fn queue_docked(screen: Rect) -> bool {
+    screen.width() >= 1340.
 }
 pub(in crate::ui) fn caption_rect(
     screen: Rect,
@@ -100,16 +130,14 @@ impl LyricsLayout {
             page.min + vec2(0., 100.),
             pos2(page.right(), page.bottom() - footer - 24.),
         );
-        let side = (page.width() * 0.36).min(body.height() * 0.96).max(80.);
+        let side = (page.width() * 0.402).min(body.height() * 0.96).max(80.);
+        let y = (body.center().y + 20.).min(body.bottom() - side * 0.5);
         let cover = Rect::from_center_size(
-            pos2(
-                page.left() + page.width() * 0.05 + side * 0.5,
-                body.center().y,
-            ),
+            pos2(page.left() + page.width() * 0.05 + side * 0.5, y),
             vec2(side, side),
         );
         let lines = Rect::from_min_max(
-            pos2(page.left() + page.width() * 0.47, body.top()),
+            pos2(page.left() + page.width() * 0.506, body.top()),
             pos2(
                 page.right() - (page.width() * 0.035).clamp(24., 72.),
                 body.bottom(),
@@ -118,7 +146,7 @@ impl LyricsLayout {
         Self {
             cover,
             lines,
-            font_scale: (lines.width() / 650.).clamp(0.72, 1.),
+            font_scale: (lines.width() / 850.).clamp(0.72, 1.2),
         }
     }
 }
@@ -128,7 +156,6 @@ pub(super) struct PlayerLayout {
     pub cover: Option<Rect>,
     pub transport: Rect,
     pub transport_center: f32,
-    pub time: Pos2,
     pub quality: Rect,
     pub favorite: Rect,
     pub menu: Rect,
@@ -138,9 +165,17 @@ pub(super) struct PlayerLayout {
 impl PlayerLayout {
     pub fn new(r: Rect, lyrics: bool, text_width: f32) -> Self {
         let stacked = r.height() > 140.;
-        let transport = r.translate(vec2(0., if stacked { 76. } else { 0. }));
+        let transport = r.translate(vec2(0., if stacked { 59. } else { 0. }));
+        let metadata_top = if stacked { 10. } else { 25. };
+        let action_y = r.top() + if stacked { 45. } else { 59. };
         let transport_left = r.center().x - 150.;
-        let quality = Rect::from_min_size(pos2(r.right() - 168., r.top() + 27.), vec2(146., 45.));
+        let quality = Rect::from_min_size(
+            pos2(
+                r.right() - 184.,
+                r.top() + metadata_top + if stacked { 3. } else { 8. },
+            ),
+            vec2(160., 52.),
+        );
         let text_x = r.left() + if lyrics { 24. } else { 113. };
         // Keep track actions attached to the song, rather than to the middle of
         // the window. Long metadata truncates before the action group.
@@ -153,31 +188,28 @@ impl PlayerLayout {
             .clamp(120., 300.)
             .min((group_limit - text_x - 96.).max(0.));
         let favorite_x = text_x + text_width + 34.;
-        let metadata = Rect::from_min_size(pos2(text_x, r.top() + 24.), vec2(text_width, 68.));
+        let metadata =
+            Rect::from_min_size(pos2(text_x, r.top() + metadata_top), vec2(text_width, 68.));
         let extras_start = if stacked {
             r.right() - 222.
         } else {
-            quality.left() - 220.
+            quality.left() - 200.
         };
-        let transport_center = if stacked {
-            r.center().x.min(extras_start - 185.)
-        } else {
-            r.center().x
-        };
+        let transport_center = transport_center(r);
         Self {
             metadata,
-            cover: (!lyrics).then(|| Rect::from_min_size(r.min + vec2(24., 24.), vec2(68., 68.))),
+            cover: (!lyrics)
+                .then(|| Rect::from_min_size(r.min + vec2(24., metadata_top), vec2(68., 68.))),
             transport,
             transport_center,
-            time: pos2(transport_center, r.top() + if stacked { 158. } else { 88. }),
             quality,
-            favorite: Rect::from_center_size(pos2(favorite_x, r.top() + 59.), vec2(44., 44.)),
-            menu: Rect::from_center_size(pos2(favorite_x + 44., r.top() + 59.), vec2(36., 36.)),
+            favorite: Rect::from_center_size(pos2(favorite_x, action_y), vec2(44., 40.)),
+            menu: Rect::from_center_size(pos2(favorite_x + 44., action_y), vec2(36., 36.)),
             extras: std::array::from_fn(|i| {
                 Rect::from_center_size(
                     pos2(
                         extras_start + i as f32 * 52.,
-                        r.top() + if stacked { 122. } else { 59. },
+                        r.top() + if stacked { 105. } else { 59. },
                     ),
                     vec2(38., 38.),
                 )
@@ -275,7 +307,7 @@ mod tests {
                 assert!(!p.cover.intersects(p.lines));
                 assert!(p.cover.bottom() < page.bottom() - player_height(width as f32));
                 assert!(p.lines.bottom() < page.bottom() - player_height(width as f32));
-                assert!((0.72..=1.).contains(&p.font_scale));
+                assert!((0.72..=1.2).contains(&p.font_scale));
             }
         }
     }
@@ -293,7 +325,8 @@ mod tests {
                     pos2(p.transport_center, p.transport.top() + 46.),
                     vec2(300., 52.),
                 );
-                let mut regions = vec![p.metadata, transport, p.quality, p.favorite, p.menu];
+                let seek = seek_rail(r).expand2(vec2(0., 8.));
+                let mut regions = vec![p.metadata, transport, p.quality, p.favorite, p.menu, seek];
                 regions.extend(p.extras);
                 if let Some(cover) = p.cover {
                     regions.push(cover);

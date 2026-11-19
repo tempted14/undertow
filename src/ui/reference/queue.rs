@@ -12,7 +12,11 @@ impl App {
         let progress = layout::ease(ctx.animate_bool_with_time(
             Id::new("queue-panel-motion"),
             self.queue_open,
-            0.2,
+            if self.settings.animated_lyrics {
+                0.2 / self.settings.motion_speed
+            } else {
+                0.
+            },
         ));
         if progress <= 0. {
             return;
@@ -28,9 +32,9 @@ impl App {
                     ui.disable();
                 }
                 Frame::new()
-                    .fill(Color32::from_rgba_unmultiplied(43, 43, 43, 248))
-                    .corner_radius(16)
-                    .stroke(Stroke::new(1_f32, Color32::from_gray(66)))
+                    .fill(Color32::from_gray(22))
+                    .corner_radius(design::PANEL)
+                    .stroke(Stroke::new(1_f32, design::SEPARATOR))
                     .inner_margin(22)
                     .shadow(egui::epaint::Shadow {
                         offset: [-4, 8],
@@ -62,7 +66,7 @@ impl App {
                             } else {
                                 "Play queue"
                             },
-                            font(25., true),
+                            font(design::SECTION, true),
                             Color32::WHITE,
                         );
                         for (name, dx, tip) in [
@@ -96,9 +100,10 @@ impl App {
                                 }
                             }
                         }
+                        ui.add_space(14.);
                         egui::ScrollArea::vertical()
                             .id_salt("queue-panel-body")
-                            .max_height((inner.y - 58.).max(100.))
+                            .max_height((inner.y - 72.).max(80.))
                             .show(ui, |ui| {
                                 if self.show_saved_later {
                                     let later = self.saved_later.clone();
@@ -206,6 +211,7 @@ impl App {
                                         .or_else(|| self.current.as_ref().map(|t| t.album.as_str()))
                                         .filter(|s| !s.is_empty())
                                         .unwrap_or("Your queue");
+                                    let next_heading = format!("Next Up from: {title}");
                                     at(
                                         ui,
                                         Rect::from_min_max(source.min, source.max - vec2(56., 0.)),
@@ -260,10 +266,11 @@ impl App {
                                     if let Some(current) = self.current.clone() {
                                         self.queue_row(ui, &current, "current", 0, None, true);
                                     }
+                                    ui.add_space(44.);
                                     let start = (self.index + 1).min(self.queue.len());
                                     let queue = self.queue.clone();
                                     if start < queue.len() {
-                                        label(ui, "Next up", 16., true, TEXT);
+                                        label(ui, next_heading, 17., true, TEXT);
                                         let height =
                                             (rect.bottom() - 22. - ui.cursor().top()).max(48.);
                                         self.queue_rows(
@@ -300,7 +307,8 @@ impl App {
                         !rect.contains(p) && !self.queue_button_rect.is_some_and(|r| r.contains(p))
                     })
             });
-            if dismiss || outside {
+            let docked = self.page != Page::Lyrics && layout::queue_docked(screen);
+            if dismiss || (outside && !docked) {
                 self.queue_open = false;
             }
         }
@@ -389,8 +397,10 @@ impl App {
                     true,
                     if current {
                         ACCENT
+                    } else if list == "history" {
+                        GREY
                     } else {
-                        Color32::from_gray(176)
+                        TEXT
                     },
                 );
                 ui.add_space(3.);
@@ -398,10 +408,24 @@ impl App {
             },
         );
         let area = Rect::from_center_size(r.right_center() - vec2(11., 0.), vec2(28., 32.));
-        paint_icon(ui.painter(), area.shrink(6.), "dots", GREY);
+        paint_icon(
+            ui.painter(),
+            area.shrink(6.),
+            if list == "upcoming" { "close" } else { "dots" },
+            if list == "upcoming" { TEXT } else { GREY },
+        );
         let menu = ui
             .interact(area, Id::new(("queue-menu", list, index)), Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(if list == "upcoming" {
+                "Remove from queue"
+            } else {
+                "More"
+            });
+        if list == "upcoming" && menu.clicked() {
+            Arc::make_mut(&mut self.queue).remove(index);
+            return false;
+        }
         let one;
         let source = if let Some(source) = tracks {
             source
@@ -409,30 +433,28 @@ impl App {
             one = Arc::new(vec![track.clone()]);
             &one
         };
-        egui::Popup::menu(&menu).show(|ui| {
-            self.track_menu(
-                ui,
-                track,
-                index.min(source.len().saturating_sub(1)),
-                source,
-                None,
-                false,
-            );
-            if list == "upcoming" && ui.button("Remove from queue").clicked() {
-                Arc::make_mut(&mut self.queue).remove(index);
-                ui.close();
-            }
-            if list == "later" && ui.button("Remove from Saved for Later").clicked() {
-                Arc::make_mut(&mut self.saved_later).remove(index);
-                if let Err(error) = crate::config::write_json(
-                    &data_dir().join("saved-later.json"),
-                    &*self.saved_later,
-                ) {
-                    self.toast(error.to_string(), true);
+        if list != "upcoming" {
+            egui::Popup::menu(&menu).show(|ui| {
+                self.track_menu(
+                    ui,
+                    track,
+                    index.min(source.len().saturating_sub(1)),
+                    source,
+                    None,
+                    false,
+                );
+                if list == "later" && ui.button("Remove from Saved for Later").clicked() {
+                    Arc::make_mut(&mut self.saved_later).remove(index);
+                    if let Err(error) = crate::config::write_json(
+                        &data_dir().join("saved-later.json"),
+                        &*self.saved_later,
+                    ) {
+                        self.toast(error.to_string(), true);
+                    }
+                    ui.close();
                 }
-                ui.close();
-            }
-        });
+            });
+        }
         response.context_menu(|ui| {
             self.track_menu(
                 ui,

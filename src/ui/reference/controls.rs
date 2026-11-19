@@ -82,12 +82,13 @@ fn lyrics_header(
         if i < 3 {
             ui.painter().rect_filled(
                 rect,
-                24,
-                Color32::from_white_alpha((fill * 255. + (1. - fill) * hover * 12.) as u8),
+                22,
+                design::SURFACE
+                    .gamma_multiply(hover)
+                    .lerp_to_gamma(design::BRAND, fill),
             );
-            let color = Color32::from_gray(
-                ((if response.hovered() { 240. } else { 150. }) * (1. - fill)).round() as u8,
-            );
+            let color =
+                if response.hovered() { TEXT } else { GREY }.lerp_to_gamma(design::INK, fill);
             ui.painter().text(
                 if i == 2 {
                     rect.left_center() + vec2(15., 0.)
@@ -240,14 +241,22 @@ impl App {
             let hover = ui.ctx().animate_bool_with_time(
                 response.id.with("hover"),
                 response.hovered(),
-                0.14,
+                if self.settings.animated_lyrics {
+                    design::FAST / self.settings.motion_speed
+                } else {
+                    0.
+                },
             );
             let hover = layout::ease(hover);
-            if active || hover > 0. {
+            if (*name != "toggle" && active) || hover > 0. {
                 ui.painter().circle_filled(
                     rect.center(),
                     20.,
-                    Color32::from_white_alpha(if active { 20 } else { (hover * 15.) as u8 }),
+                    if active {
+                        Color32::from_gray(52)
+                    } else {
+                        design::HOVER.gamma_multiply(hover)
+                    },
                 );
             }
             let glyph = if *name == "toggle" {
@@ -258,7 +267,7 @@ impl App {
             let visual = Rect::from_center_size(
                 rect.center(),
                 if *name == "toggle" {
-                    vec2(52., 52.)
+                    vec2(46., 46.)
                 } else {
                     vec2(34., 34.)
                 },

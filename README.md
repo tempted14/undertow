@@ -32,7 +32,7 @@ Release builds remap local compiler paths; packaging verifies the executable con
 
 ## Performance and UI verification
 
-Version 0.2.2 uses contiguous PCM copies, cheaper exact sample-clock updates, retained word layouts and prompt cancellation of blocked spool readers. See the [measured results and limits](docs/PERFORMANCE-0.2.2.md). The [0.2.1 lyric transitions](docs/PERFORMANCE-0.2.1.md) and [0.2.0 rendering/font/privacy improvements](docs/PERFORMANCE-0.2.0.md) remain in place.
+Version 0.3.0 updates the [desktop layout and playback controls](docs/DESKTOP-REDESIGN.md). The progress bar previews each drag and sends one seek on release. See the [0.2.2 playback measurements](docs/PERFORMANCE-0.2.2.md), [0.2.1 lyric transitions](docs/PERFORMANCE-0.2.1.md), and [0.2.0 rendering, font, and privacy improvements](docs/PERFORMANCE-0.2.0.md) for the previous releases.
 
 The audio conversion hot path reuses its sample storage, library reads run separately from playback/edit requests, and album metadata uses a bounded recent-item cache. Results and limitations are recorded in [the audit](docs/VALIDATION.md) and [performance measurements](docs/PERFORMANCE.md).
 
@@ -42,4 +42,4 @@ The repository includes the complete native source, pinned dependencies, local r
 
 ## License
 
-Original code: MIT. Dependencies retain their own licenses and attribution; see [third-party notices](docs/THIRD-PARTY.md). Source for the local Symphonia modifications is included under its MPL-2.0 terms.
+Original code: MIT. Third-party material retains its own licenses and attribution. See the [third-party notices](docs/THIRD-PARTY.md) and [Nationale typeface provenance](assets/tidal-ui/README.md). Source for the local Symphonia modifications is included under its MPL-2.0 terms.

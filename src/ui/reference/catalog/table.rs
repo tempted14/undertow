@@ -37,11 +37,11 @@ impl App {
                     vec![
                         (0, "#", 0.),
                         (1, "TITLE", 0.032),
-                        (2, "ARTIST", 0.37),
-                        (5, "BITRATE", 0.66),
-                        (6, "SAMPLE RATE", 0.735),
-                        (7, "DEPTH", 0.825),
-                        (8, "TIME", 0.89),
+                        (2, "ARTIST", 0.47),
+                        (5, "BITRATE", 0.645),
+                        (6, "SAMPLE RATE", 0.722),
+                        (7, "DEPTH", 0.81),
+                        (8, "TIME", 0.86),
                     ]
                 } else {
                     vec![
@@ -53,7 +53,7 @@ impl App {
                         (5, "BITRATE", 0.645),
                         (6, "SAMPLE RATE", 0.72),
                         (7, "DEPTH", 0.81),
-                        (8, "TIME", 0.87),
+                        (8, "TIME", 0.86),
                     ]
                 };
                 if !self.settings.show_quality {
@@ -62,13 +62,10 @@ impl App {
                 let collection = playlist.is_none() && !album;
                 let (header, _) = ui.allocate_exact_size(vec2(w, 44.), Sense::hover());
                 for (position, (col, name, fraction)) in columns.iter().enumerate() {
-                    let next = columns
-                        .get(position + 1)
-                        .map(|(_, _, f)| *f)
-                        .unwrap_or(0.94);
+                    let right = columns.get(position + 1).map_or(w - 92., |(_, _, f)| w * f);
                     let rect = Rect::from_min_size(
                         header.min + vec2(w * fraction, 0.),
-                        vec2(w * (next - fraction), 40.),
+                        vec2(right - w * fraction, 40.),
                     );
                     ui.painter().text(
                         rect.min + vec2(if *col == 0 { 13. } else { 0. }, 10.),
@@ -260,7 +257,7 @@ impl App {
                             } else {
                                 AQUA
                             };
-                            for (col, _, f) in &columns {
+                            for (position, (col, _, f)) in columns.iter().enumerate() {
                                 if *col < 2 {
                                     continue;
                                 }
@@ -282,16 +279,15 @@ impl App {
                                     8 => clock(t.duration as f64),
                                     _ => String::new(),
                                 };
-                                let next = columns
-                                    .iter()
-                                    .find(|(c, _, _)| c > col)
-                                    .map(|(_, _, f)| *f)
-                                    .unwrap_or(0.92);
+                                // The rightmost cell ends before the fixed-position add button.
+                                let right = columns
+                                    .get(position + 1)
+                                    .map_or(w - 92., |(_, _, f)| w * f - 12.);
                                 at(
                                     ui,
                                     Rect::from_min_size(
                                         row.min + vec2(w * f, 19.),
-                                        vec2(w * (next - f) - 12., 30.),
+                                        vec2(right - w * f, 30.),
                                     ),
                                     ("track-cell", &key, index, col),
                                     |ui| {
@@ -366,9 +362,9 @@ impl App {
                             );
                             egui::Popup::menu(&plus).show(|ui| {
                                 ui.label("Add to playlist");
-                                for p in self.playlists.clone().into_iter().filter(|p| p.owned) {
-                                    if ui.button(p.title).clicked() {
-                                        self.send(Command::Add(p.id, t.id));
+                                for p in self.playlists.clone().iter().filter(|p| p.owned) {
+                                    if ui.button(&p.title).clicked() {
+                                        self.send(Command::Add(p.id.clone(), t.id));
                                         ui.close();
                                     }
                                 }

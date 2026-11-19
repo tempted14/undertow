@@ -76,10 +76,14 @@ pub(super) fn track_filter(
         background,
         egui::Shape::rect_stroke(
             rect,
-            14,
+            design::CONTROL,
             Stroke::new(
                 1_f32,
-                Color32::from_white_alpha(if response.has_focus() { 150 } else { 35 }),
+                if response.has_focus() {
+                    design::BRAND
+                } else {
+                    design::SEPARATOR
+                },
             ),
             egui::StrokeKind::Inside,
         ),
@@ -252,7 +256,7 @@ impl App {
                     ui.allocate_space(vec2(w,form_height));
                     ui.add_space(8.);
                     Frame::new().fill(Color32::from_rgb(30,30,34)).corner_radius(18)
-                        .stroke(Stroke::new(1_f32,Color32::from_gray(36))).inner_margin(Margin::symmetric(22,20)).show(ui,|ui| {
+                        .stroke(Stroke::new(1_f32,Color32::from_gray(36))).inner_margin(Margin::symmetric(22,if compact {12} else {20})).show(ui,|ui| {
                         ui.set_width(ui.available_width());
                         let (r,response)=ui.allocate_exact_size(vec2(ui.available_width(),58.),Sense::click());
                         let public=draft.public.unwrap_or(false);

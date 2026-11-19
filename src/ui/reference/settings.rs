@@ -6,7 +6,7 @@ const SETTINGS_MUTED: Color32 = Color32::from_rgb(165, 165, 174);
 
 fn section(ui: &mut egui::Ui, title: &str) {
     let compact = ui.ctx().content_rect().height() < 700.;
-    ui.add_space(if compact { 18. } else { 42. });
+    ui.add_space(if compact { 18. } else { 65. });
     ui.horizontal(|ui| {
         ui.add_space(20.);
         label(ui, title, 21., true, SETTINGS_INK);
@@ -16,9 +16,9 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 fn group(ui: &mut egui::Ui, body: impl FnOnce(&mut egui::Ui)) {
     Frame::new()
-        .fill(Color32::from_rgb(14, 14, 16))
-        .stroke(Stroke::new(1_f32, Color32::from_gray(24)))
+        .fill(Color32::from_rgb(16, 16, 18))
         .corner_radius(21)
+        .stroke(Stroke::new(1_f32, Color32::from_gray(22)))
         .inner_margin(Margin::symmetric(22, 0))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -98,7 +98,7 @@ fn switch(ui: &mut egui::Ui, title: &str, subtitle: &str, value: &mut bool) {
         0.16,
     ));
     let rail = Rect::from_center_size(right.center(), vec2(55., 34.));
-    let fill = Color32::from_gray(48).lerp_to_gamma(Color32::from_gray(231), progress);
+    let fill = Color32::from_rgb(48, 48, 54).lerp_to_gamma(Color32::from_gray(229), progress);
     ui.painter().rect_filled(rail, 18, fill);
     let center = pos2(rail.left() + 17. + 21. * progress, rail.center().y);
     ui.painter().circle_filled(
@@ -157,7 +157,7 @@ impl App {
             .gap(12.)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_gray(44))
+                    .fill(design::POPOVER)
                     .corner_radius(17)
                     .inner_margin(7),
             )
@@ -342,74 +342,68 @@ impl App {
         let before = self.settings.clone();
         let compact = ui.ctx().content_rect().height() < 700.;
         let tab_height = if compact { 42. } else { 54. };
-        let available = (ui.available_height() - reserved_player(ui.ctx()) - 12.).max(80.);
-        egui::ScrollArea::vertical()
-            .id_salt(("tidal-settings", self.settings_tab))
-            .max_height(available)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_max_width(ui.available_width().min(1072.));
-                ui.spacing_mut().item_spacing = vec2(12., 0.);
-                ui.add_space(if compact { 8. } else { 25. });
-                label(
-                    ui,
-                    "Settings",
-                    if compact { 28. } else { 38. },
-                    true,
-                    Color32::from_gray(191),
+        let margin = ((ui.available_width() - 1072.) * 0.5).max(24.);
+        let panel = [
+            "settings-general",
+            "settings-account",
+            "settings-plugins",
+            "settings-about",
+        ][self.settings_tab.min(3)];
+        super::catalog::catalog_canvas(ui, panel, margin, 0., |ui| {
+            ui.spacing_mut().item_spacing = vec2(12., 0.);
+            ui.add_space(if compact { 8. } else { 25. });
+            label(
+                ui,
+                "Settings",
+                if compact { 28. } else { design::TITLE },
+                true,
+                TEXT,
+            );
+            ui.add_space(if compact { 12. } else { 26. });
+            let (tabs, _) =
+                ui.allocate_exact_size(vec2(ui.available_width(), tab_height), Sense::hover());
+            ui.painter().hline(
+                tabs.x_range(),
+                tabs.bottom(),
+                Stroke::new(1_f32, design::SEPARATOR),
+            );
+            let mut x = tabs.left();
+            for (index, title) in [(0, "General"), (1, "Account"), (3, "About"), (2, "Plugins")] {
+                let r = Rect::from_min_size(
+                    pos2(x, tabs.top()),
+                    vec2(if index == 0 { 96. } else { 100. }, tab_height),
                 );
-                ui.add_space(if compact { 12. } else { 26. });
-                let (tabs, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), tab_height), Sense::hover());
-                ui.painter().hline(
-                    tabs.x_range(),
-                    tabs.bottom(),
-                    Stroke::new(1_f32, Color32::from_gray(27)),
+                x = r.right();
+                let b = ui
+                    .interact(r, Id::new(("settings-tab", index)), Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                let selected = self.settings_tab == index;
+                ui.painter().text(
+                    r.left_center(),
+                    Align2::LEFT_CENTER,
+                    title,
+                    font(18., true),
+                    if selected || b.hovered() { TEXT } else { GREY },
                 );
-                let mut x = tabs.left();
-                for (index, title) in ["General", "Account", "Plugins", "About"]
-                    .iter()
-                    .enumerate()
-                {
-                    let r = Rect::from_min_size(
-                        pos2(x, tabs.top()),
-                        vec2(if index == 0 { 96. } else { 100. }, tab_height),
+                if selected {
+                    ui.painter().hline(
+                        r.left()..=r.left() + 65.,
+                        tabs.bottom(),
+                        Stroke::new(1_f32, TEXT),
                     );
-                    x = r.right();
-                    let b = ui
-                        .interact(r, Id::new(("settings-tab", index)), Sense::click())
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    let selected = self.settings_tab == index;
-                    ui.painter().text(
-                        r.left_center(),
-                        Align2::LEFT_CENTER,
-                        *title,
-                        font(18., true),
-                        if selected || b.hovered() {
-                            TEXT
-                        } else {
-                            Color32::from_gray(117)
-                        },
-                    );
-                    if selected {
-                        ui.painter().hline(
-                            r.left()..=r.left() + 65.,
-                            tabs.bottom(),
-                            Stroke::new(1.5_f32, TEXT),
-                        );
-                    }
-                    if b.clicked() {
-                        self.settings_tab = index;
-                    }
                 }
-                match self.settings_tab {
-                    0 => self.settings_general(ui),
-                    1 => self.settings_account(ui),
-                    2 => self.settings_plugins(ui),
-                    _ => self.settings_about(ui),
+                if b.clicked() {
+                    self.settings_tab = index;
                 }
-                ui.add_space(45.);
-            });
+            }
+            match self.settings_tab {
+                0 => self.settings_general(ui),
+                1 => self.settings_account(ui),
+                2 => self.settings_plugins(ui),
+                _ => self.settings_about(ui),
+            }
+            ui.add_space(45.);
+        });
         if before.font_enabled != self.settings.font_enabled {
             self.apply_settings_font(ui.ctx());
         }
@@ -424,17 +418,9 @@ impl App {
         section(ui, "Audio quality");
         group(ui, |ui| {
             for (i, title, description) in [
-                (
-                    0,
-                    "Low",
-                    "Balance audio quality and data consumption · 320 kbps",
-                ),
-                (1, "High", "16-bit, 44.1 kHz · lossless FLAC"),
-                (
-                    2,
-                    "Max",
-                    "Up to 24-bit, 192 kHz · highest available lossless FLAC",
-                ),
+                (0, "Low", "Balance audio quality and data consumption"),
+                (1, "High", "16-bit, 44.1 kHz"),
+                (2, "Max", "Up to 24-bit, 192 kHz"),
             ] {
                 if i > 0 {
                     divider(ui);
@@ -478,9 +464,25 @@ impl App {
                     pos2(r.left() + 50., r.center().y + 17.),
                     Align2::LEFT_CENTER,
                     description,
-                    font(16., true),
+                    font(16., false),
                     SETTINGS_MUTED,
                 );
+                if i == 0 && r.width() > 640. {
+                    let bitrate =
+                        Rect::from_center_size(r.right_center() - vec2(54., 0.), vec2(108., 42.));
+                    ui.painter().rect_filled(bitrate, 9, design::SURFACE);
+                    ui.painter().text(
+                        bitrate.center(),
+                        Align2::CENTER_CENTER,
+                        if self.settings.quality == "LOW" {
+                            "96 kbps"
+                        } else {
+                            "320 kbps"
+                        },
+                        font(16., true),
+                        TEXT,
+                    );
+                }
                 if b.clicked() {
                     self.settings.quality = ["HIGH", "LOSSLESS", "HI_RES_LOSSLESS"][i].into();
                     self.settings.strict_lossless = i > 0;

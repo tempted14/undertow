@@ -2,6 +2,37 @@ use super::interactions::ListAction;
 use super::*;
 use crate::discovery::{Feed, Item, Section};
 
+fn shelf_arrow(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui::Response {
+    let (r, response) = ui.allocate_exact_size(
+        vec2(32., 32.),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    ui.painter().circle_filled(
+        r.center(),
+        16.,
+        if response.hovered() && enabled {
+            design::HOVER
+        } else {
+            design::SURFACE
+        },
+    );
+    paint_icon(
+        ui.painter(),
+        r.shrink(5.),
+        glyph,
+        if enabled { TEXT } else { GREY },
+    );
+    response.on_hover_cursor(if enabled {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Default
+    })
+}
+
 #[derive(Default)]
 pub(in crate::ui) struct State {
     pub feed: Arc<Feed>,
@@ -132,7 +163,9 @@ impl App {
             self.refresh_discovery();
         }
         if self.discovery.loading && self.discovery.feed.sections.is_empty() {
-            label(ui, "Loading your TIDAL recommendations…", 16., false, GREY);
+            label(ui, "Loading recommendations…", 16., false, GREY);
+            ui.add_space(12.);
+            design::skeleton(ui, ui.available_width());
         }
         if let Some(error) = self.discovery.error.clone() {
             ui.add_space(12.);
@@ -147,12 +180,12 @@ impl App {
                 if section.shortcuts {
                     self.discovery_rows(ui, &section.items, true, 6);
                 } else {
-                    let cols = columns(ui.available_width(), 210., 22., 8);
+                    let cols = columns(ui.available_width(), 208., 20., 8);
                     let mut offset = *self.discovery.offsets.get(&section.id).unwrap_or(&0);
                     let last = section.items.len().saturating_sub(cols);
                     offset = offset.min(last);
                     ui.horizontal(|ui| {
-                        label(ui, &section.title, 26., true, TEXT);
+                        label(ui, &section.title, design::SECTION, true, TEXT);
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
                                 .add(
@@ -166,10 +199,10 @@ impl App {
                                 self.open_discovery_section(section);
                             }
                             if !section.rows && section.items.len() > cols {
-                                if icon(ui, "forward", 30., GREY).clicked() {
+                                if shelf_arrow(ui, "forward", offset < last).clicked() {
                                     offset = offset.saturating_add(cols).min(last);
                                 }
-                                if icon(ui, "back", 30., GREY).clicked() {
+                                if shelf_arrow(ui, "back", offset > 0).clicked() {
                                     offset = offset.saturating_sub(cols);
                                 }
                             }
@@ -179,13 +212,13 @@ impl App {
                     if !section.subtitle.is_empty() {
                         label(ui, &section.subtitle, 16., false, GREY);
                     }
-                    ui.add_space(18.);
+                    ui.add_space(14.);
                     if section.rows {
                         self.discovery_rows(ui, &section.items, false, 9);
                     } else {
-                        let size = (ui.available_width() - 22. * (cols - 1) as f32) / cols as f32;
+                        let size = (ui.available_width() - 20. * (cols - 1) as f32) / cols as f32;
                         ui.horizontal_top(|ui| {
-                            ui.spacing_mut().item_spacing.x = 22.;
+                            ui.spacing_mut().item_spacing.x = 20.;
                             for item in section.items.iter().skip(offset).take(cols) {
                                 self.discovery_card(ui, item, size);
                             }
@@ -193,12 +226,12 @@ impl App {
                     }
                 }
             });
-            ui.add_space(48.);
+            ui.add_space(if section.shortcuts { 46. } else { 48. });
         }
     }
     fn discovery_card(&mut self, ui: &mut egui::Ui, item: &Item, size: f32) {
         ui.push_id(item.key(), |ui| {
-            let (r, response) = ui.allocate_exact_size(vec2(size, size + 66.), Sense::click());
+            let (r, response) = ui.allocate_exact_size(vec2(size, size + 65.), Sense::click());
             if !ui.is_rect_visible(r) {
                 return;
             }
@@ -218,7 +251,7 @@ impl App {
                     if item.catalog.kind == "Artist" {
                         (size * 0.5) as u8
                     } else {
-                        4
+                        design::ART
                     },
                 )
             });
@@ -254,13 +287,14 @@ impl App {
                 Rect::from_min_max(r.min + vec2(0., size + 12.), r.max),
                 "label",
                 |ui| {
+                    ui.spacing_mut().item_spacing.y = 3.;
                     ui.horizontal(|ui| {
-                        label(ui, &item.catalog.title, 18., true, TEXT);
+                        label(ui, &item.catalog.title, 17., true, TEXT);
                         if item.catalog.explicit {
                             self.explicit_badge(ui);
                         }
                     });
-                    label(ui, &item.catalog.artist, 17., false, GREY);
+                    label(ui, &item.catalog.artist, 15., false, GREY);
                 },
             );
             let title = ui
@@ -276,17 +310,17 @@ impl App {
         });
     }
     fn discovery_rows(&mut self, ui: &mut egui::Ui, items: &[Item], shortcuts: bool, max: usize) {
-        let gap = 10.;
+        let gap = if shortcuts { 10. } else { 42. };
         let cols = columns(
             ui.available_width(),
-            if shortcuts { 250. } else { 340. },
+            if shortcuts { 198. } else { 285. },
             gap,
             3,
         );
         let width = (ui.available_width() - gap * (cols - 1) as f32) / cols as f32;
         egui::Grid::new(("discovery-rows", shortcuts))
             .num_columns(cols)
-            .spacing(vec2(gap, 8.))
+            .spacing(vec2(gap, if shortcuts { 10. } else { 8. }))
             .show(ui, |ui| {
                 for (i, item) in items.iter().take(max).enumerate() {
                     ui.push_id(item.key(), |ui| {
@@ -303,15 +337,33 @@ impl App {
                         if shortcuts || response.hovered() {
                             ui.painter().rect_filled(
                                 r,
-                                6,
-                                Color32::from_gray(if response.hovered() { 27 } else { 17 }),
+                                8,
+                                if response.hovered() {
+                                    design::HOVER
+                                } else {
+                                    design::SURFACE
+                                },
                             );
                         }
-                        let size = if shortcuts { 58. } else { 70. };
-                        let cover = Rect::from_min_size(r.min + vec2(10., 8.), vec2(size, size));
+                        let size = if shortcuts { 58. } else { 74. };
+                        let padding = if shortcuts { 10. } else { 0. };
+                        let cover = Rect::from_min_size(
+                            pos2(r.left() + padding, r.center().y - size * 0.5),
+                            vec2(size, size),
+                        );
                         if item.catalog.kind == "My Tracks" {
-                            ui.painter()
-                                .rect_filled(cover, 4, Color32::from_rgb(71, 85, 183));
+                            let mut colors = egui::Mesh::default();
+                            for (point, color) in [
+                                (cover.left_top(), Color32::from_rgb(83, 112, 192)),
+                                (cover.right_top(), Color32::from_rgb(76, 171, 223)),
+                                (cover.left_bottom(), Color32::from_rgb(115, 94, 190)),
+                                (cover.right_bottom(), Color32::from_rgb(85, 30, 112)),
+                            ] {
+                                colors.colored_vertex(point, color);
+                            }
+                            colors.add_triangle(0, 1, 2);
+                            colors.add_triangle(1, 3, 2);
+                            ui.painter().add(egui::Shape::mesh(colors));
                             paint_icon(
                                 ui.painter(),
                                 Rect::from_min_size(
@@ -348,17 +400,17 @@ impl App {
                         let text = Rect::from_min_max(
                             r.min
                                 + vec2(
-                                    size + 26.,
+                                    size + padding + 16.,
                                     if item.catalog.artist.is_empty() {
-                                        27.
+                                        24.
                                     } else {
-                                        14.
+                                        10.
                                     },
                                 ),
                             r.max - vec2(48., 3.),
                         );
                         at(ui, text, "name", |ui| {
-                            label(ui, &item.catalog.title, 17., true, TEXT);
+                            label(ui, &item.catalog.title, 16., true, TEXT);
                             if !item.catalog.artist.is_empty() {
                                 ui.add_space(3.);
                                 let subtitle = if shortcuts && item.catalog.kind == "Playlist" {
@@ -374,7 +426,7 @@ impl App {
                                 } else {
                                     item.catalog.artist.clone()
                                 };
-                                label(ui, subtitle, 16., false, GREY);
+                                label(ui, subtitle, 14., false, GREY);
                             }
                         });
                         let mut played = false;
@@ -445,8 +497,8 @@ impl App {
             if section.rows {
                 self.discovery_rows(ui, &section.items, false, section.items.len());
             } else {
-                let cols = columns(ui.available_width(), 210., 22., 8);
-                let size = (ui.available_width() - 22. * (cols - 1) as f32) / cols as f32;
+                let cols = columns(ui.available_width(), 172., 18., 7);
+                let size = (ui.available_width() - 18. * (cols - 1) as f32) / cols as f32;
                 egui::Grid::new(("discovery-expanded", id))
                     .num_columns(cols)
                     .spacing(vec2(22., 28.))

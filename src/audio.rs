@@ -44,11 +44,19 @@ pub struct AudioStats {
     pub underrun_samples: AtomicU64,
     pub seek_ms: AtomicU64,
     pub epoch: AtomicU64,
-    pub done: AtomicBool,
+    positioned_epoch: AtomicU64,
+    // Zero means open. EOF belongs to the decoder generation that reached it.
+    eof_epoch: AtomicU64,
     pub cancel: AtomicBool,
     pub error: Mutex<Option<String>>,
 }
 impl AudioStats {
+    fn pending_seek(&self) -> Option<f64> {
+        let epoch = self.epoch.load(Ordering::Acquire);
+        (self.positioned_epoch.load(Ordering::Acquire) != epoch)
+            .then(|| self.seek_ms.load(Ordering::Relaxed) as f64 / 1000.)
+    }
+
     /// Wake a blocked spool reader as well as setting the cancellation flag.
     /// Only control/decoder threads call this; the audio callback stays lock-free.
     fn cancel_stream(&self) {
@@ -672,6 +680,7 @@ impl Iterator for PcmSource {
             if self.buffer.capacity() > 0 {
                 let _ = self.recycle.try_send(std::mem::take(&mut self.buffer));
             }
+            let mut confirmed_eof = false;
             loop {
                 match self.rx.try_recv() {
                     Ok(p) if p.epoch == epoch => {
@@ -687,8 +696,15 @@ impl Iterator for PcmSource {
                     }
                     Err(TryRecvError::Disconnected) => return None,
                     Err(TryRecvError::Empty) => {
-                        if self.stats.done.load(Ordering::Acquire) {
-                            return None;
+                        if self.stats.eof_epoch.load(Ordering::Acquire) == epoch.wrapping_add(1)
+                            && self.stats.epoch.load(Ordering::Acquire) == epoch
+                        {
+                            if confirmed_eof {
+                                return None;
+                            }
+                            // A final packet may have arrived before EOF was published.
+                            confirmed_eof = true;
+                            continue;
                         }
                         self.stats.underrun_samples.fetch_add(1, Ordering::Relaxed);
                         return Some(0.0);
@@ -769,15 +785,16 @@ impl Audio {
                         epoch = current;
                         let ms = stats2.seek_ms.load(Ordering::Acquire);
                         if let Err(error) = p.decoder.try_seek(Duration::from_millis(ms)) {
+                            stats2.positioned_epoch.store(epoch, Ordering::Release);
                             if let Ok(mut problem) = stats2.error.lock() {
                                 *problem = Some(format!("Audio seek failed: {error}"));
                             }
-                            stats2.done.store(true, Ordering::Release);
                             break;
                         }
                         stats2
                             .played_samples
                             .store(ms * rate as u64 * channels as u64 / 1000, Ordering::Relaxed);
+                        stats2.positioned_epoch.store(epoch, Ordering::Release);
                     }
                     let mut samples = spare
                         .take()
@@ -790,13 +807,14 @@ impl Audio {
                     p.decoder.copy_samples(&mut samples, PCM_SAMPLES);
                     if samples.is_empty() {
                         spare = Some(samples);
-                        stats2.done.store(true, Ordering::Release);
+                        stats2
+                            .eof_epoch
+                            .store(epoch.wrapping_add(1), Ordering::Release);
                         loop {
                             if stats2.cancel.load(Ordering::Relaxed) {
                                 break 'decode;
                             }
                             if stats2.epoch.load(Ordering::Acquire) != epoch {
-                                stats2.done.store(false, Ordering::Release);
                                 continue 'decode;
                             }
                             stats2.decoder_waits.fetch_add(1, Ordering::Relaxed);
@@ -823,7 +841,9 @@ impl Audio {
                         }
                     }
                 }
-                stats2.done.store(true, Ordering::Release);
+                stats2
+                    .eof_epoch
+                    .store(epoch.wrapping_add(1), Ordering::Release);
             })?;
         let decoder_thread = decoder.thread().clone();
         // Start after a bounded pre-roll. The audio callback never waits on a network read.
@@ -856,15 +876,27 @@ impl Audio {
         self.stats.played_samples.load(Ordering::Relaxed) as f64
             / (self.format.sample_rate as f64 * self.format.channels as f64).max(1.0)
     }
+    pub fn timeline_position(&self) -> f64 {
+        if let Some(seconds) = self.stats.pending_seek() {
+            return seconds;
+        }
+        self.position()
+    }
     pub fn consumed_seconds(&self) -> f64 {
         self.stats.consumed_samples.load(Ordering::Relaxed) as f64
             / (self.format.sample_rate as f64 * self.format.channels as f64).max(1.0)
     }
     pub fn seek(&self, seconds: f64) {
+        let seconds = seconds.max(0.);
+        // The one-past-end timestamp is not seekable in every container.
+        let seconds = if self.format.duration > 0. {
+            seconds.min((self.format.duration - 0.001).max(0.))
+        } else {
+            seconds
+        };
         self.stats
             .seek_ms
-            .store((seconds.max(0.0) * 1000.0) as u64, Ordering::Release);
-        self.stats.done.store(false, Ordering::Release);
+            .store((seconds * 1000.) as u64, Ordering::Release);
         self.stats.epoch.fetch_add(1, Ordering::AcqRel);
         self.decoder_thread.unpark();
     }
@@ -1107,6 +1139,48 @@ mod tests {
         assert_eq!(stats.consumed_samples.load(Ordering::Relaxed), 5);
         assert_eq!(stats.underrun_samples.load(Ordering::Relaxed), 0);
         assert_eq!(reused.try_iter().count(), 2);
+    }
+
+    #[test]
+    fn timeline_holds_requested_position_until_decoder_acknowledges_it() {
+        let stats = AudioStats::default();
+        assert_eq!(stats.pending_seek(), None);
+        stats.seek_ms.store(38_500, Ordering::Relaxed);
+        stats.epoch.store(2, Ordering::Release);
+        stats.positioned_epoch.store(1, Ordering::Release);
+        assert_eq!(stats.pending_seek(), Some(38.5));
+        stats.positioned_epoch.store(2, Ordering::Release);
+        assert_eq!(stats.pending_seek(), None);
+    }
+
+    #[test]
+    fn eof_from_before_a_seek_cannot_end_the_new_generation() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let (recycle, _reused) = mpsc::sync_channel(1);
+        let stats = Arc::new(AudioStats::default());
+        let mut source = PcmSource {
+            rx,
+            recycle,
+            decoder_thread: std::thread::current(),
+            buffer: vec![],
+            pos: 0,
+            epoch: 0,
+            stats: stats.clone(),
+            rate: 44100,
+            channels: 2,
+            duration: None,
+        };
+        stats.epoch.store(1, Ordering::Release);
+        stats.eof_epoch.store(1, Ordering::Release);
+        assert_eq!(source.next(), Some(0.));
+        tx.send(Packet {
+            samples: vec![0.5],
+            epoch: 1,
+        })
+        .unwrap();
+        stats.eof_epoch.store(2, Ordering::Release);
+        assert_eq!(source.next(), Some(0.5));
+        assert_eq!(source.next(), None);
     }
     #[test]
     fn consuming_pcm_wakes_the_waiting_producer_and_drop_cancels_it() {

@@ -1,5 +1,7 @@
 # Current release validation
 
+For 0.3.0, see the [desktop reference and verification scope](DESKTOP-REDESIGN.md). The release includes regression checks for single-commit scrubbing, stale end-of-stream markers, and primary-button contrast.
+
 For 0.2.2, see [playback overhead and resource lifecycle](PERFORMANCE-0.2.2.md) and [the credential review](SECURITY-0.2.2.md). 114 app tests, five renderer tests and three privacy tests pass. Six steady workloads report zero underruns; exact sample/pixel comparisons, cancellation cleanup, credential redirects, navigation, collapsed viewport and EOF checks pass. Unfavorable benchmark readings and repeated comparisons are retained. Existing live-account limitations remain below.
 
 ---
