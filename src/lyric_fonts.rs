@@ -43,15 +43,38 @@ impl Layout {
         match self {
             #[cfg(windows)]
             Self::Native(line) => line.fragments(byte_start, byte_end),
-            _ => Arc::default(),
+            Self::Atlas(line) => {
+                let Some(prefix) = line.text().get(..byte_start) else {
+                    return Arc::default();
+                };
+                let Some(word) = line.text().get(byte_start..byte_end) else {
+                    return Arc::default();
+                };
+                let start = prefix.chars().count();
+                let end = start + word.chars().count();
+                let mut offset = 0;
+                let mut fragments = Vec::new();
+                for row in &line.rows {
+                    let first = start.saturating_sub(offset);
+                    let last = end.saturating_sub(offset).min(row.glyphs.len());
+                    if first < last {
+                        let bounds = row.rect();
+                        fragments.push((
+                            Rect::from_min_max(
+                                egui::pos2(row.pos.x + row.x_offset(first), bounds.top()),
+                                egui::pos2(row.pos.x + row.x_offset(last), bounds.bottom()),
+                            ),
+                            false,
+                        ));
+                    }
+                    offset += row.glyphs.len() + usize::from(row.ends_with_newline);
+                    if offset >= end {
+                        break;
+                    }
+                }
+                fragments.into()
+            }
         }
-    }
-    pub fn native(&self) -> bool {
-        #[cfg(windows)]
-        if matches!(self, Self::Native(_)) {
-            return true;
-        }
-        false
     }
 }
 
@@ -110,6 +133,34 @@ pub fn word_range(text: &str, word: &str, cursor: &mut usize) -> Option<std::ops
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn word_fragments_follow_the_wrapped_line_geometry() {
+        let ctx = egui::Context::default();
+        let text = "Écho Écho\nlast";
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let layout = Layout::Atlas(ctx.fonts_mut(|fonts| {
+                fonts.layout(text.into(), FontId::proportional(24.), Color32::WHITE, 72.)
+            }));
+            let mut cursor = 0;
+            let hits: Vec<_> = ["Écho", "Écho", "last"]
+                .into_iter()
+                .map(|word| {
+                    let range = word_range(text, word, &mut cursor).unwrap();
+                    let fragments = layout.fragments(range.start, range.end);
+                    assert_eq!(fragments.len(), 1);
+                    assert!(!fragments[0].1);
+                    fragments[0].0
+                })
+                .collect();
+            assert!(hits.windows(2).all(|pair| pair[0].top() < pair[1].top()));
+            assert!(
+                hits.iter()
+                    .all(|hit| hit.width() > 0. && hit.bottom() <= layout.size().y)
+            );
+        });
+    }
     #[test]
     fn complex_scripts_and_combining_marks_use_contextual_layout() {
         for text in [

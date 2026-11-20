@@ -44,6 +44,7 @@ impl App {
             return;
         }
         self.page = Page::Album(id, title);
+        self.album_track_reveal = None;
         self.search_preview = false;
         self.send(Command::Album(id));
     }

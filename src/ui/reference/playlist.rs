@@ -540,7 +540,7 @@ impl App {
                 forms::filter_summary(ui, filter, self.playlist_filtered.len(), tracks.len());
             }
             ui.add_space(56. * s);
-            self.catalog_track_table(ui, tracks.clone(), Some(playlist), false);
+            self.catalog_track_table(ui, tracks.clone(), Some(playlist), None);
         });
     }
 }

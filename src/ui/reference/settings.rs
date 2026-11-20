@@ -743,13 +743,6 @@ impl App {
             divider(ui);
             switch(
                 ui,
-                "Cover-colored glow",
-                "Tint only the halo. Keep the sung words bright white unless you select a custom text color.",
-                &mut self.settings.lyric_cover_color,
-            );
-            divider(ui);
-            switch(
-                ui,
                 "Radiant Lyrics",
                 "Try the public word-timed lyric provider when cached or TIDAL lyrics are unavailable.",
                 &mut self.settings.radiant_provider,

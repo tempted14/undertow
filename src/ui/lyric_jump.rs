@@ -5,21 +5,20 @@ pub(super) struct Jump {
     pub from: f32,
     pub requested: f64,
     pub started: Instant,
-    pub awaiting_audio: bool,
 }
 impl Jump {
-    pub fn new(from: f32, requested: f64, awaiting_audio: bool) -> Self {
+    pub fn new(from: f32, requested: f64) -> Self {
         Self {
             from,
             requested,
             started: Instant::now(),
-            awaiting_audio,
         }
     }
     pub fn sample(from: f32, target: f32, seconds: f32, speed: f32) -> (f32, bool) {
-        let t = (seconds * speed.clamp(0.5, 2.) / 0.34).clamp(0., 1.);
-        // Quintic easing has zero velocity and acceleration at both endpoints.
-        let ease = t * t * t * (t * (t * 6. - 15.) + 10.);
+        let duration = (0.22 + (target - from).abs().sqrt() * 0.004).min(0.42);
+        let t = (seconds * speed.clamp(0.5, 2.) / duration).clamp(0., 1.);
+        // Start and settle gently without overshooting the selected line.
+        let ease = t * t * (3. - 2. * t);
         (from + (target - from) * ease, t < 1.)
     }
 }
@@ -39,7 +38,7 @@ mod tests {
                 assert!((position - previous) * (target - 250.) >= -0.01);
                 previous = position;
             }
-            assert_eq!(Jump::sample(250., target, 0.34, 1.), (target, false));
+            assert_eq!(Jump::sample(250., target, 0.42, 1.), (target, false));
         }
         let current = Jump::sample(0., 2000., 0.12, 1.).0;
         assert_eq!(Jump::sample(current, 0., 0., 1.).0, current);

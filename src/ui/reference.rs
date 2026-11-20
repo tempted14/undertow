@@ -9,6 +9,7 @@ pub(super) mod forms;
 mod home_motion;
 pub(in crate::ui) mod layout;
 mod lyric_navigation;
+pub(super) mod lyric_words;
 mod queue;
 mod seek_bar;
 use layout::{PlayerLayout, columns, reserved_player};
@@ -1046,25 +1047,28 @@ impl App {
                     });
                 }
                 let [title_row, artist_row, context_row] = layout.metadata_rows();
-                at(ui, title_row, "player-title", |ui| {
+                let open_album = at(ui, title_row, "player-title", |ui| {
                     ui.spacing_mut().item_spacing = vec2(7., 0.);
                     let title = track
                         .as_ref()
                         .map(|t| t.title.as_str())
                         .unwrap_or("Choose a track");
                     let explicit = track.as_ref().is_some_and(|t| t.explicit);
-                    let natural = title_width;
-                    let width = natural
+                    let link = track.as_ref().is_some_and(|t| t.id > 0 && t.album_id > 0);
+                    let width = title_width
                         .min((ui.available_width() - if explicit { 27. } else { 0. }).max(24.));
                     ui.horizontal(|ui| {
-                        ui.add_sized(
-                            vec2(width, 22.),
-                            egui::Label::new(
-                                RichText::new(title).font(font(18., true)).color(TEXT),
+                        let clicked = ui
+                            .allocate_ui_with_layout(
+                                vec2(width, 22.),
+                                Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    text_link(ui, title, 18., true, TEXT, link)
+                                        .on_hover_text(title)
+                                        .clicked()
+                                },
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(title);
+                            .inner;
                         if explicit {
                             ui.add(egui::Label::new(
                                 RichText::new(" E ")
@@ -1073,8 +1077,15 @@ impl App {
                                     .background_color(TEXT),
                             ));
                         }
-                    });
+                        clicked
+                    })
+                    .inner
                 });
+                if open_album && let Some(t) = &track {
+                    self.open_album(t.album_id, t.album.clone());
+                    self.album_track_reveal = Some((t.album_id, t.id));
+                    ctx.request_repaint();
+                }
                 let artist_response = at(ui, artist_row, "player-artist", |ui| {
                     label(
                         ui,
@@ -1337,10 +1348,20 @@ impl App {
             self.now_playing_panel(ui, lyrics_rect);
             return;
         }
+        self.preview_lyric_navigation(ui.ctx());
         let data = self.lyrics.clone();
-        let position = self.lyric_position();
+        let position = self.lyric_display_position();
+        // The audio seek interface rounds to milliseconds. Keep an exact tapped
+        // timestamp on its line during that rounding window.
+        let position = self.lyric_jump.as_ref().map_or(position, |jump| {
+            if (jump.requested - position).abs() < 0.002 {
+                position.max(jump.requested)
+            } else {
+                position
+            }
+        });
         let active = data.active(position);
-        let text_width = (lyrics_rect.width() - 16.).max(80.);
+        let text_width = (lyrics_rect.width() - 24.).max(80.);
         // Keep the sung text luminous white like the reference; artwork colors belong
         // in the backdrop and optional halo, never as a dark tint over the words.
         let custom = self.settings.lyric_color;
@@ -1359,9 +1380,9 @@ impl App {
             glow_color.g(),
             glow_color.b(),
             if self.settings.lyric_cover_color {
-                180
+                210
             } else {
-                110
+                160
             },
         );
         let idle_color = Color32::from_white_alpha(155);
@@ -1395,10 +1416,9 @@ impl App {
                 self.lyric_jump = None;
             }
             if self.lyric_layout_key != Some(key) {
-                self.lyric_jump = None;
                 self.lyric_offsets.clear();
                 self.lyric_galleys.clear();
-                self.lyric_word_galleys = None;
+                self.lyric_word_fragments = None;
                 self.lyric_offsets.push(0.);
                 for line in &data.lines {
                     let size = crate::lyric_fonts::measure(
@@ -1414,7 +1434,6 @@ impl App {
                 }
                 self.lyric_layout_key = Some(key);
             }
-            self.preview_lyric_navigation(ui.ctx());
             if lyric_navigation::scroll(
                 ui,
                 lyrics_rect,
@@ -1432,11 +1451,14 @@ impl App {
                 self.ui_motion_until = Instant::now() + Duration::from_millis(220);
             }
             if data.synced && !self.lyric_manual_scroll {
-                let target = active
-                    .map(|i| (self.lyric_offsets[i] - lyrics_rect.height() * 0.28).max(0.))
-                    .unwrap_or(0.);
+                let offsets = &self.lyric_offsets;
+                let anchor = lyrics_rect.height() * 0.28;
+                let scroll_target =
+                    |index: Option<usize>| index.map_or(0., |i| (offsets[i] - anchor).max(0.));
+                let target = scroll_target(active);
+                let elapsed = self.animation_clock.elapsed().as_secs_f32();
                 let dt = crate::lyrics::follow_step(
-                    self.animation_clock.elapsed().as_secs_f32(),
+                    elapsed,
                     active.map_or(0., |i| (position - data.lines[i].start) as f32),
                     target != self.lyric_follow_target,
                 );
@@ -1445,37 +1467,40 @@ impl App {
                 let seeked = self
                     .lyric_last_position
                     .is_some_and(|last| position < last - 0.12 || position - last > 0.75);
-                if (seeked && self.lyric_jump.is_none())
-                    || self.lyric_entry_generation != self.generation
-                {
+                if self.lyric_entry_generation != self.generation {
                     self.lyric_scroll = target;
                     self.lyric_velocity = 0.;
+                    self.lyric_jump = None;
                     self.lyric_entry_generation = self.generation;
+                } else if seeked
+                    && self.settings.animated_lyrics
+                    && self
+                        .lyric_jump
+                        .as_ref()
+                        .is_none_or(|jump| (position - jump.requested).abs() > 0.35)
+                {
+                    self.lyric_jump = Some(crate::ui::lyric_jump::Jump::new(
+                        self.lyric_scroll,
+                        position,
+                    ));
                 }
                 self.lyric_last_position = Some(position);
-                if let Some(jump) = &mut self.lyric_jump {
-                    if jump.awaiting_audio
-                        && ((position - jump.requested).abs() < 0.35
-                            || jump.started.elapsed().as_secs_f32() > 0.6)
-                    {
-                        jump.awaiting_audio = false;
-                        jump.from = self.lyric_scroll;
-                        jump.started = Instant::now();
-                    }
-                    if !jump.awaiting_audio {
-                        let (scroll, moving) = crate::ui::lyric_jump::Jump::sample(
-                            jump.from,
-                            target,
-                            jump.started.elapsed().as_secs_f32(),
-                            self.settings.motion_speed,
-                        );
-                        self.lyric_scroll = scroll;
-                        self.lyric_frame_motion = moving;
-                        if !moving {
-                            self.lyric_jump = None;
-                        }
+                if let Some(jump) = &self.lyric_jump {
+                    let (scroll, moving) = crate::ui::lyric_jump::Jump::sample(
+                        jump.from,
+                        scroll_target(data.active(jump.requested)),
+                        jump.started.elapsed().as_secs_f32(),
+                        self.settings.motion_speed,
+                    );
+                    self.lyric_velocity = if moving {
+                        (scroll - self.lyric_scroll) / elapsed.max(0.001)
                     } else {
-                        self.lyric_frame_motion = true;
+                        0.
+                    };
+                    self.lyric_scroll = scroll;
+                    self.lyric_frame_motion = moving;
+                    if !moving {
+                        self.lyric_jump = None;
                     }
                 } else {
                     crate::lyrics::follow_scroll(
@@ -1494,7 +1519,6 @@ impl App {
                         || (self.lyric_scroll - target).abs() > 0.02)
                 {
                     self.lyric_frame_motion = true;
-                    ui.ctx().request_repaint();
                 }
             } else {
                 if !data.synced && self.lyric_entry_generation != self.generation {
@@ -1507,7 +1531,7 @@ impl App {
             let offsets = &self.lyric_offsets;
             {
                 let viewport = Rect::from_min_size(pos2(0., self.lyric_scroll), lyrics_rect.size());
-                let origin = ui.max_rect().min - vec2(0., self.lyric_scroll);
+                let origin = ui.max_rect().min + vec2(8., -self.lyric_scroll);
                 let first = offsets
                     .partition_point(|&v| v < viewport.top())
                     .saturating_sub(1);
@@ -1544,10 +1568,10 @@ impl App {
                         vec2(text_width, offsets[i + 1] - offsets[i]),
                     );
                     at(ui, area, ("line", i), |ui| {
-                        let edge_distance = (area.bottom() - lyrics_rect.top())
+                        ui.set_clip_rect(area.expand2(vec2(7., 6.)).intersect(lyrics_rect));
+                        let edge_distance = (area.top() + galley.size().y - lyrics_rect.top())
                             .min(lyrics_rect.bottom() - area.top());
                         ui.multiply_opacity(layout::ease(edge_distance / 108.));
-                        let size = text_size;
                         let emphasis = if !data.synced {
                             1.
                         } else if self.settings.animated_lyrics {
@@ -1568,163 +1592,40 @@ impl App {
                             idle_color
                         };
                         let color = resting.lerp_to_gamma(text_color, emphasis);
-                        let mut word_seeked = false;
-                        let response = if active_line && !line.words.is_empty() && galley.native() {
-                            // Shape the complete line once. Highlight and seek visual
-                            // word fragments without breaking Arabic joins/Indic clusters.
-                            let response =
-                                lyric_galley(ui, galley.clone(), unlit_color, None, None);
-                            let mut cursor = 0;
-                            for (word_index, word) in line.words.iter().enumerate() {
-                                let Some(range) = crate::lyric_fonts::word_range(
-                                    &line.text,
-                                    &word.text,
-                                    &mut cursor,
-                                ) else {
-                                    continue;
-                                };
-                                let fraction = if self.settings.animated_lyrics {
-                                    ((position - word.start) / (word.end - word.start).max(0.06))
-                                        .clamp(0., 1.) as f32
-                                } else if position >= word.start {
-                                    1.
-                                } else {
-                                    0.
-                                };
-                                for (fragment_index, (local, rtl)) in
-                                    galley.fragments(range.start, range.end).iter().enumerate()
-                                {
-                                    let hit = local.translate(response.rect.min.to_vec2());
-                                    if fraction > 0. {
-                                        let mut clip = hit.expand2(vec2(0., 7.));
-                                        if *rtl {
-                                            clip.min.x = hit.right() - hit.width() * fraction;
-                                        } else {
-                                            clip.max.x = hit.left() + hit.width() * fraction;
-                                        }
-                                        let painter = ui
-                                            .painter()
-                                            .with_clip_rect(ui.clip_rect().intersect(clip));
-                                        paint_lyric_galley(
-                                            &painter,
-                                            response.rect.min,
-                                            galley.clone(),
-                                            color,
-                                            self.settings.lyric_glow.then_some(glow_color),
-                                        );
-                                    }
-                                    if ui
-                                        .interact(
-                                            hit,
-                                            Id::new((
-                                                "native-lyric-word",
-                                                i,
-                                                word_index,
-                                                fragment_index,
-                                            )),
-                                            Sense::click(),
-                                        )
-                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                        .clicked()
-                                        && self.audio.is_some()
-                                    {
-                                        word_seeked = true;
-                                        seek_request = Some(word.start);
-                                    }
-                                }
+                        let glow = (data.synced && self.settings.lyric_glow && emphasis > 0.01)
+                            .then(|| glow_color.gamma_multiply(emphasis));
+                        let (response, word_seek) = if active_line && !line.words.is_empty() {
+                            let words = &mut self.lyric_word_fragments;
+                            if words.as_ref().is_none_or(|words| words.index != i) {
+                                *words = Some(lyric_words::WordLayout::new(i, line, &galley));
                             }
-                            response
-                        } else if active_line && !line.words.is_empty() {
-                            // Only the active line needs individual word layouts.
-                            // Reuse their immutable shapes for both paint passes;
-                            // color and fill clipping do not affect font geometry.
-                            if self
-                                .lyric_word_galleys
-                                .as_ref()
-                                .is_none_or(|(index, _)| *index != i)
-                            {
-                                self.lyric_word_galleys = Some((
-                                    i,
-                                    line.words
-                                        .iter()
-                                        .map(|word| {
-                                            crate::lyric_fonts::layout(
-                                                ui.ctx(),
-                                                &word.text,
-                                                font(size, true),
-                                                f32::INFINITY,
-                                            )
-                                        })
-                                        .collect(),
-                                ));
-                            }
-                            let word_galleys = &self.lyric_word_galleys.as_ref().unwrap().1;
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing.x = 0.;
-                                for (word, galley) in line.words.iter().zip(word_galleys) {
-                                    let fraction = if self.settings.animated_lyrics {
-                                        ((position - word.start)
-                                            / (word.end - word.start).max(0.06))
-                                        .clamp(0., 1.)
-                                            as f32
-                                    } else if position >= word.start {
-                                        1.
-                                    } else {
-                                        0.
-                                    };
-                                    let b =
-                                        lyric_galley(ui, galley.clone(), unlit_color, None, None);
-                                    if fraction > 0. {
-                                        let clip = Rect::from_min_max(
-                                            b.rect.min - vec2(6., 7.),
-                                            pos2(
-                                                b.rect.left() + b.rect.width() * fraction,
-                                                b.rect.bottom() + 7.,
-                                            ),
-                                        );
-                                        let painter = ui
-                                            .painter()
-                                            .with_clip_rect(ui.clip_rect().intersect(clip));
-                                        paint_lyric_galley(
-                                            &painter,
-                                            b.rect.min,
-                                            galley.clone(),
-                                            color,
-                                            self.settings.lyric_glow.then_some(glow_color),
-                                        );
-                                    }
-                                    if b.clicked() && self.audio.is_some() {
-                                        word_seeked = true;
-                                        seek_request = Some(word.start);
-                                    }
-                                }
-                            })
-                            .response
-                        } else {
-                            lyric_galley(
+                            words.as_ref().unwrap().paint(
                                 ui,
-                                galley,
-                                color,
-                                (active_line
-                                    && self.settings.lyric_glow
-                                    && self.settings.effect_strength > 0.1)
-                                    .then_some(glow_color),
-                                if data.synced
-                                    && !active_line
-                                    && self.settings.lyric_motion_blur
-                                    && self.settings.lyric_blur_strength > 0.
-                                {
-                                    Some(LyricBlur {
-                                        radius: 3.5
-                                            * (1. - emphasis)
-                                            * self.settings.lyric_blur_strength.clamp(0., 1.),
-                                        trail: (self.lyric_velocity * 0.006).clamp(-8., 8.)
-                                            * self.settings.lyric_blur_strength.clamp(0., 1.),
-                                    })
-                                } else {
-                                    None
+                                &galley,
+                                line,
+                                position,
+                                self.settings.animated_lyrics,
+                                lyric_words::Colors {
+                                    resting: unlit_color,
+                                    fill: color,
+                                    glow,
                                 },
                             )
+                        } else {
+                            let blur = (data.synced
+                                && !active_line
+                                && glow.is_none()
+                                && self.settings.lyric_motion_blur
+                                && self.settings.lyric_blur_strength > 0.)
+                                .then(|| {
+                                    let strength = self.settings.lyric_blur_strength.clamp(0., 1.);
+                                    LyricBlur {
+                                        radius: 3.5 * (1. - emphasis) * strength,
+                                        trail: (self.lyric_velocity * 0.006).clamp(-8., 8.)
+                                            * strength,
+                                    }
+                                });
+                            (lyric_galley(ui, galley, color, glow, blur), None)
                         };
                         response.context_menu(|ui| {
                             if self.settings.copy_lyrics && ui.button("Copy this line").clicked() {
@@ -1732,9 +1633,11 @@ impl App {
                                 ui.close();
                             }
                         });
-                        if response.clicked() && !word_seeked && data.synced && self.audio.is_some()
+                        if data.synced
+                            && self.audio.is_some()
+                            && (word_seek.is_some() || response.clicked())
                         {
-                            seek_request = Some(line.start);
+                            seek_request = Some(word_seek.unwrap_or(line.start));
                         }
                         if self.translated {
                             let second = if self.settings.romanize {

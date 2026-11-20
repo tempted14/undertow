@@ -578,7 +578,7 @@ impl App {
                     label(ui, "Loading mix from TIDAL…", 17., false, GREY);
                 }
             }
-            self.catalog_track_table(ui, tracks, Some(&list), false);
+            self.catalog_track_table(ui, tracks, Some(&list), None);
         });
     }
 }

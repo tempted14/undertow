@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-11-20
+
+- Keep wrapped lyrics in the same position as karaoke highlighting advances. Start following a tapped lyric while the audio seek is still being processed, and let a new seek interrupt the scroll.
+- Restore the wider Colorama Lyrics glow with optional cover-art tint. Reuse shaped text and combine adjacent word highlights to limit repeated drawing during playback.
+- Click the song title in the player bar to open its album and scroll to its highlighted track. Album lists keep offscreen rows virtualized.
+
 ## 0.3.1 — 2026-11-20
 
 - Show decoded artwork immediately and save its disk cache in the background. Keep a download worker available for visible artwork when prefetch requests are already running.

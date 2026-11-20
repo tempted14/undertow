@@ -52,7 +52,7 @@ impl App {
                     GREY,
                 );
             } else {
-                self.catalog_track_table(ui, tracks, None, false);
+                self.catalog_track_table(ui, tracks, None, None);
             }
         });
     }

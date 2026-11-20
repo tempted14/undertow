@@ -359,7 +359,7 @@ impl App {
         let was_manual = std::mem::take(&mut self.lyric_manual_scroll);
         self.lyric_entry_generation = self.generation;
         self.lyric_jump = (self.settings.animated_lyrics && self.lyrics.synced).then(|| {
-            crate::ui::lyric_jump::Jump::new(self.lyric_scroll, self.lyric_position(), false)
+            crate::ui::lyric_jump::Jump::new(self.lyric_scroll, self.lyric_display_position())
         });
         self.lyric_last_position = None;
         self.lyric_velocity = 0.;

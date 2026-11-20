@@ -102,6 +102,7 @@ pub struct App {
     settings: Settings,
     worker: Worker,
     page: Page,
+    album_track_reveal: Option<(u64, u64)>,
     playlists: Arc<Vec<Playlist>>,
     tracks: HashMap<String, Arc<Vec<Track>>>,
     favorite_ids: HashSet<u64>,
@@ -166,7 +167,7 @@ pub struct App {
     shuffle_on: bool,
     lyric_offsets: Vec<f32>,
     lyric_galleys: HashMap<usize, crate::lyric_fonts::Layout>,
-    lyric_word_galleys: Option<(usize, Vec<crate::lyric_fonts::Layout>)>,
+    lyric_word_fragments: Option<reference::lyric_words::WordLayout>,
     lyric_layout_key: Option<(u64, u32, u32, bool, usize, u32)>,
     lyric_scroll: f32,
     lyric_manual_scroll: bool,
@@ -506,21 +507,21 @@ fn lyric_galley(
     let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
     if let Some(blur) = blur {
         let [red, green, blue, alpha] = color.to_srgba_unmultiplied();
-        // Five taps instead of nine: same total weight, ~45% fewer galley draws for
-        // every visible inactive line, on every frame.
+        // As the lines move, shift the blur weight from the sides into the
+        // vertical trail. Fast scrolling only needs three glyph passes.
+        let motion = (blur.trail.abs() / 1.2).min(1.);
         for (dx, dy, weight) in [
-            (0., -1., 2.),
-            (-1., 0., 2.),
-            (0., 0., 8.),
-            (1., 0., 2.),
-            (0., 1., 2.),
+            (0., -1., 2. + motion),
+            (-1., 0., 2. * (1. - motion)),
+            (0., 0., 8. + 2. * motion),
+            (1., 0., 2. * (1. - motion)),
+            (0., 1., 2. + motion),
         ] {
-            let tint = Color32::from_rgba_unmultiplied(
-                red,
-                green,
-                blue,
-                (alpha as f32 * weight / 16.).round() as u8,
-            );
+            let opacity = (alpha as f32 * weight / 16.).round() as u8;
+            if opacity == 0 {
+                continue;
+            }
+            let tint = Color32::from_rgba_unmultiplied(red, green, blue, opacity);
             galley.paint(
                 ui.painter(),
                 rect.min
@@ -546,12 +547,30 @@ fn paint_lyric_galley(
 ) {
     let galley = galley.into();
     if let Some(glow) = glow {
-        let glow = glow.gamma_multiply(0.125);
-        for offset in [vec2(-2., 0.), vec2(2., 0.), vec2(0., -2.), vec2(0., 2.)] {
-            galley.paint(painter, origin + offset, glow);
-        }
+        paint_lyric_halo(painter, origin, &galley, glow);
     }
     galley.paint(painter, origin, color);
+}
+
+fn paint_lyric_halo(
+    painter: &egui::Painter,
+    origin: Pos2,
+    galley: &crate::lyric_fonts::Layout,
+    glow: Color32,
+) {
+    let [r, g, b, alpha] = glow.to_srgba_unmultiplied();
+    let tint = |strength: u16| {
+        Color32::from_rgba_unmultiplied(r, g, b, (strength * alpha as u16 / 255) as u8)
+    };
+    // The outer ring softens the edge while the inner ring keeps the glow visible.
+    let wide = tint(28);
+    for offset in [vec2(-6., -5.), vec2(6., -5.), vec2(-6., 5.), vec2(6., 5.)] {
+        galley.paint(painter, origin + offset, wide);
+    }
+    let tight = tint(54);
+    for offset in [vec2(-3., 0.), vec2(3., 0.), vec2(0., -3.), vec2(0., 3.)] {
+        galley.paint(painter, origin + offset, tight);
+    }
 }
 
 impl App {
@@ -640,6 +659,7 @@ impl App {
             } else {
                 Page::Home
             },
+            album_track_reveal: None,
             playlists: Arc::new(
                 crate::config::read_json(&data_dir().join("playlists.json")).unwrap_or_default(),
             ),
@@ -716,7 +736,7 @@ impl App {
             shuffle_on: false,
             lyric_offsets: Vec::new(),
             lyric_galleys: HashMap::new(),
-            lyric_word_galleys: None,
+            lyric_word_fragments: None,
             lyric_layout_key: None,
             lyric_scroll: 0.0,
             lyric_manual_scroll: false,
@@ -911,13 +931,17 @@ impl App {
     fn lyric_position(&self) -> f64 {
         (self.position() + self.settings.lyric_offset_ms as f64 / 1000.).max(0.)
     }
+    fn lyric_display_position(&self) -> f64 {
+        let position = self.audio.as_ref().map_or(0., Audio::timeline_position);
+        (position + self.settings.lyric_offset_ms as f64 / 1000.).max(0.)
+    }
     fn seek_lyric(&mut self, seconds: f64) {
         if let Some(audio) = &self.audio {
             audio.seek((seconds - self.settings.lyric_offset_ms as f64 / 1000.).max(0.));
             self.lyric_jump = self
                 .settings
                 .animated_lyrics
-                .then(|| lyric_jump::Jump::new(self.lyric_scroll, seconds, true));
+                .then(|| lyric_jump::Jump::new(self.lyric_scroll, seconds));
             self.lyric_frame_motion = self.lyric_jump.is_some();
             self.lyric_manual_scroll = false;
             self.lyric_velocity = 0.;
@@ -978,7 +1002,7 @@ impl App {
             }
         }
         self.lyric_scroll = 0.0;
-        self.lyric_word_galleys = None;
+        self.lyric_word_fragments = None;
         self.lyric_jump = None;
         self.lyric_manual_scroll = false;
         self.lyric_velocity = 0.;
@@ -1285,6 +1309,12 @@ impl App {
                 Event::Tracks(key, t) => {
                     if key == "favorites" {
                         self.favorite_ids = t.iter().filter(|t| t.id > 0).map(|t| t.id).collect();
+                    }
+                    if let Some((album, track)) = self.album_track_reveal
+                        && key.strip_prefix("album:").and_then(|id| id.parse().ok()) == Some(album)
+                        && !t.iter().any(|row| row.id == track)
+                    {
+                        self.album_track_reveal = None;
                     }
                     let tracks = Arc::new(t);
                     if self.pending_list.as_ref().is_some_and(|(k, _)| k == &key)
@@ -1886,9 +1916,9 @@ impl App {
         details["ui_frames"] = serde_json::json!(self.frame);
         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
         details["retained_lyric_word_layouts"] = serde_json::json!(
-            self.lyric_word_galleys
+            self.lyric_word_fragments
                 .as_ref()
-                .map_or(0, |(_, words)| words.len())
+                .map_or(0, |words| words.len())
         );
         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);
         details["lyric_scroll_offset"] = serde_json::json!(self.lyric_scroll);
@@ -2082,6 +2112,12 @@ impl App {
             self.update_overlay();
             ctx.request_repaint_after(Duration::from_millis(200));
             return;
+        }
+        if self
+            .album_track_reveal
+            .is_some_and(|(album, _)| !matches!(self.page, Page::Album(id, _) if id == album))
+        {
+            self.album_track_reveal = None;
         }
         let transition = if self.settings.animated_lyrics {
             (self.motion_started.elapsed().as_secs_f32() * self.settings.motion_speed / 0.24)

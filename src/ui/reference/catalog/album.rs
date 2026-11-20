@@ -1,13 +1,9 @@
 use super::*;
 impl App {
     pub(in crate::ui) fn reference_album(&mut self, ui: &mut egui::Ui, id: u64, title: &str) {
-        let tracks = self
-            .tracks
-            .get(&format!("album:{id}"))
-            .cloned()
-            .unwrap_or_default();
-        let first = tracks.first().cloned().unwrap_or_default();
         let key = format!("album:{id}");
+        let tracks = self.tracks.get(&key).cloned().unwrap_or_default();
+        let first = tracks.first().cloned().unwrap_or_default();
         let info = self.albums.get(&id).cloned().unwrap_or_else(|| Album {
             id,
             title: if title.is_empty() {
@@ -23,7 +19,7 @@ impl App {
         let margin = (room.width() * 0.034).clamp(24., 65.);
         let compact = ui.ctx().content_rect().height() < 700.;
         let top = design::TOOLBAR + if compact { 12. } else { 28. };
-        let output = catalog_canvas(ui, "album-body", margin, 740., |ui| {
+        let output = catalog_canvas(ui, &key, margin, 740., |ui| {
             ui.add_space(top);
             let cover_size = if compact {
                 (ui.available_width() * 0.23).clamp(132., 174.)
@@ -253,7 +249,7 @@ impl App {
             ui.add_space(32.);
             ui.separator();
             ui.add_space(12.);
-            self.catalog_track_table(ui, tracks.clone(), None, true);
+            self.catalog_track_table(ui, tracks.clone(), None, Some(id));
         });
         let toolbar = Rect::from_min_size(room.min, vec2(room.width(), design::TOOLBAR));
         let opacity = (output.state.offset.y / 120.).clamp(0., 1.);
