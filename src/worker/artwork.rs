@@ -20,6 +20,17 @@ pub struct Completion {
     pub url: String,
     pub image: ArtData,
 }
+pub const PREFETCH: u8 = 1;
+
+struct CacheWrite {
+    thumbnail: PathBuf,
+    original: Option<(PathBuf, Vec<u8>)>,
+}
+
+struct Loaded {
+    image: ArtData,
+    save: Option<CacheWrite>,
+}
 #[derive(Default)]
 struct State {
     desired: HashMap<String, u8>,
@@ -55,13 +66,15 @@ trait Loader: Send + Sync {
     fn stats(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
-    fn disk(&self, url: &str, budget: u64) -> Result<Option<ArtData>>;
-    fn network(&self, url: &str, budget: u64) -> Result<ArtData>;
+    fn disk(&self, url: &str) -> Result<Option<Loaded>>;
+    fn network(&self, url: &str) -> Result<Loaded>;
+    fn persist(&self, _write: CacheWrite, _image: &ArtData, _budget: u64) {}
 }
 
-fn next_job(queue: &mut HashMap<String, u8>) -> Option<String> {
+fn next_job(queue: &mut HashMap<String, u8>, minimum: u8) -> Option<String> {
     let key = queue
         .iter()
+        .filter(|(_, priority)| **priority >= minimum)
         .max_by_key(|(_, priority)| **priority)?
         .0
         .clone();
@@ -85,7 +98,9 @@ impl Service {
         });
         let (tx, rx) = mpsc::sync_channel(8);
         // The cache lane cannot be held hostage by slow/offscreen network requests.
-        for network in [false, true, true] {
+        // Keep one CDN lane available for covers on screen. Both lanes can serve
+        // visible work, but queued prefetches cannot occupy both connections.
+        for (network, minimum) in [(false, PREFETCH), (true, PREFETCH), (true, PREFETCH + 1)] {
             let shared = shared.clone();
             let tx = tx.clone();
             let ctx = ctx.clone();
@@ -113,7 +128,7 @@ impl Service {
                                 } else {
                                     &mut state.disk
                                 };
-                                if let Some(url) = next_job(queue) {
+                                if let Some(url) = next_job(queue, minimum) {
                                     state.active.insert(url.clone());
                                     break url;
                                 }
@@ -124,9 +139,9 @@ impl Service {
                         let budget = shared.budget.load(Ordering::Relaxed).clamp(8, 128);
                         let result = if network {
                             shared.counters.network.fetch_add(1, Ordering::Relaxed);
-                            loader.network(&url, budget).map(Some)
+                            loader.network(&url).map(Some)
                         } else {
-                            loader.disk(&url, budget)
+                            loader.disk(&url)
                         };
                         let mut state = shared.state.lock().unwrap();
                         state.active.remove(&url);
@@ -134,23 +149,38 @@ impl Service {
                             return;
                         }
                         match result {
-                            Ok(Some(image)) if state.desired.contains_key(&url) => {
-                                state.ready.insert(url.clone());
-                                state.failed.remove(&url);
+                            Ok(Some(Loaded { image, save })) => {
+                                let wanted = state.desired.contains_key(&url);
+                                if wanted {
+                                    state.ready.insert(url.clone());
+                                    state.failed.remove(&url);
+                                }
                                 drop(state);
-                                if !network {
-                                    shared.counters.disk_hits.fetch_add(1, Ordering::Relaxed);
+                                if wanted {
+                                    if !network {
+                                        shared.counters.disk_hits.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    shared.counters.completed.fetch_add(1, Ordering::Relaxed);
+                                    shared.counters.load_us.fetch_add(
+                                        started.elapsed().as_micros() as u64,
+                                        Ordering::Relaxed,
+                                    );
+                                    if tx
+                                        .send(Completion {
+                                            url,
+                                            image: image.clone(),
+                                        })
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                    ctx.request_repaint();
+                                } else {
+                                    shared.counters.stale.fetch_add(1, Ordering::Relaxed);
                                 }
-                                shared.counters.completed.fetch_add(1, Ordering::Relaxed);
-                                shared.counters.load_us.fetch_add(
-                                    started.elapsed().as_micros() as u64,
-                                    Ordering::Relaxed,
-                                );
-                                ctx.request_repaint();
-                                if tx.send(Completion { url, image }).is_err() {
-                                    return;
+                                if let Some(write) = save {
+                                    loader.persist(write, &image, budget);
                                 }
-                                ctx.request_repaint();
                             }
                             Ok(None) if !network => {
                                 if let Some(priority) = state.desired.get(&url).copied() {
@@ -202,13 +232,26 @@ impl Service {
         let now = Instant::now();
         state.failed.retain(|_, next| *next > now);
         state.ready.retain(|url| desired.contains_key(url));
-        for (url, priority) in desired.iter().take(160) {
+        let mut enqueue = |url: &String, priority: u8| {
             if !state.active.contains(url)
+                && !state.disk.contains_key(url)
                 && !state.network.contains_key(url)
                 && !state.ready.contains(url)
                 && !state.failed.contains_key(url)
             {
-                state.disk.insert(url.clone(), *priority);
+                state.disk.insert(url.clone(), priority);
+            }
+        };
+        const MAX_PENDING: usize = 160;
+        if desired.len() > MAX_PENDING {
+            let mut requests: Vec<_> = desired.iter().collect();
+            requests.select_nth_unstable_by_key(MAX_PENDING - 1, |(_, p)| std::cmp::Reverse(**p));
+            for &(url, priority) in &requests[..MAX_PENDING] {
+                enqueue(url, *priority);
+            }
+        } else {
+            for (url, &priority) in desired {
+                enqueue(url, priority);
             }
         }
         self.shared.wake.notify_all();
@@ -280,7 +323,7 @@ impl Store {
         ));
         Ok((source, original, thumbnail, side))
     }
-    fn persist(&self, path: &Path, image: &ArtData, budget: u64) {
+    fn persist_thumbnail(&self, path: &Path, image: &ArtData, budget: u64) {
         // A raw, validated RGBA thumbnail avoids decoding a large JPEG on each return scroll.
         let _ = write_decoded(path, image);
         let mut maintenance = self.maintenance.lock().unwrap();
@@ -298,11 +341,11 @@ impl Loader for Store {
     fn stats(&self) -> serde_json::Value {
         serde_json::json!({"decoded_thumbnail_hits":self.decoded_hits.load(Ordering::Relaxed),"original_file_hits":self.original_hits.load(Ordering::Relaxed)})
     }
-    fn disk(&self, raw: &str, budget: u64) -> Result<Option<ArtData>> {
+    fn disk(&self, raw: &str) -> Result<Option<Loaded>> {
         let (_, original, thumbnail, side) = self.paths(raw)?;
         if let Ok(image) = read_decoded(&thumbnail) {
             self.decoded_hits.fetch_add(1, Ordering::Relaxed);
-            return Ok(Some(image));
+            return Ok(Some(Loaded { image, save: None }));
         }
         if !original.is_file() {
             return Ok(None);
@@ -311,11 +354,16 @@ impl Loader for Store {
             std::fs::metadata(&original)?.len() <= 8 * 1024 * 1024,
             "Artwork exceeds 8 MiB"
         );
-        match decode_art(std::fs::read(&original)?, side) {
+        match decode_art(&std::fs::read(&original)?, side) {
             Ok(image) => {
                 self.original_hits.fetch_add(1, Ordering::Relaxed);
-                self.persist(&thumbnail, &image, budget);
-                Ok(Some(image))
+                Ok(Some(Loaded {
+                    image,
+                    save: Some(CacheWrite {
+                        thumbnail,
+                        original: None,
+                    }),
+                }))
             }
             Err(_) if !raw.starts_with("local:") => {
                 let _ = std::fs::remove_file(original);
@@ -324,7 +372,7 @@ impl Loader for Store {
             Err(e) => Err(e),
         }
     }
-    fn network(&self, raw: &str, budget: u64) -> Result<ArtData> {
+    fn network(&self, raw: &str) -> Result<Loaded> {
         let (source, original, thumbnail, side) = self.paths(raw)?;
         ensure!(!source.starts_with("local:"), "Local cover is unavailable");
         let mut bytes = Vec::new();
@@ -337,16 +385,27 @@ impl Loader for Store {
             .take(8 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)?;
         ensure!(bytes.len() <= 8 * 1024 * 1024, "Artwork exceeds 8 MiB");
-        let image = decode_art(bytes.clone(), side)?;
-        std::fs::create_dir_all(&self.root)?;
-        // Different requested sizes can refer to the same service URL.
-        let temp = original.with_extension(format!("{:x}.tmp", rand::random::<u64>()));
-        std::fs::write(&temp, bytes)?;
-        if std::fs::rename(&temp, &original).is_err() {
-            let _ = std::fs::remove_file(temp);
+        let image = decode_art(&bytes, side)?;
+        Ok(Loaded {
+            image,
+            save: Some(CacheWrite {
+                thumbnail,
+                original: Some((original, bytes)),
+            }),
+        })
+    }
+    fn persist(&self, write: CacheWrite, image: &ArtData, budget: u64) {
+        if let Some((original, bytes)) = write.original {
+            // Different requested sizes can refer to the same service URL.
+            let temp = original.with_extension(format!("{:x}.tmp", rand::random::<u64>()));
+            if std::fs::create_dir_all(&self.root).is_ok()
+                && (std::fs::write(&temp, bytes).is_err()
+                    || std::fs::rename(&temp, &original).is_err())
+            {
+                let _ = std::fs::remove_file(temp);
+            }
         }
-        self.persist(&thumbnail, &image, budget);
-        Ok(image)
+        self.persist_thumbnail(&write.thumbnail, image, budget);
     }
 }
 fn split_size(raw: &str) -> Result<(String, u32)> {
@@ -424,8 +483,14 @@ fn read_decoded(path: &Path) -> Result<ArtData> {
             .collect()
     };
     Ok(ArtData {
-        cover: egui::ColorImage::new([w, h], pixels(&data[16..16 + w * h * 4])),
-        blur: egui::ColorImage::new([48, 48], pixels(&data[16 + w * h * 4..])),
+        cover: Arc::new(egui::ColorImage::new(
+            [w, h],
+            pixels(&data[16..16 + w * h * 4]),
+        )),
+        blur: Arc::new(egui::ColorImage::new(
+            [48, 48],
+            pixels(&data[16 + w * h * 4..]),
+        )),
         palette: [data[12], data[13], data[14]],
     })
 }
@@ -435,8 +500,8 @@ mod tests {
     use super::*;
     fn image() -> ArtData {
         ArtData {
-            cover: egui::ColorImage::filled([80, 80], Color32::LIGHT_BLUE),
-            blur: egui::ColorImage::filled([48, 48], Color32::DARK_BLUE),
+            cover: Arc::new(egui::ColorImage::filled([80, 80], Color32::LIGHT_BLUE)),
+            blur: Arc::new(egui::ColorImage::filled([48, 48], Color32::DARK_BLUE)),
             palette: [10, 80, 140],
         }
     }
@@ -445,17 +510,29 @@ mod tests {
         gate: Arc<(Mutex<bool>, Condvar)>,
     }
     impl Loader for Mock {
-        fn disk(&self, url: &str, _: u64) -> Result<Option<ArtData>> {
-            Ok(url.starts_with("cached:").then(image))
+        fn disk(&self, url: &str) -> Result<Option<Loaded>> {
+            Ok(url.starts_with("cached:").then(|| Loaded {
+                image: image(),
+                save: None,
+            }))
         }
-        fn network(&self, url: &str, _: u64) -> Result<ArtData> {
+        fn network(&self, url: &str) -> Result<Loaded> {
             self.started.send(url.to_owned()).unwrap();
+            if !url.starts_with("slow-") {
+                return Ok(Loaded {
+                    image: image(),
+                    save: None,
+                });
+            }
             let (lock, wake) = &*self.gate;
             let mut open = lock.lock().unwrap();
             while !*open {
                 open = wake.wait(open).unwrap();
             }
-            Ok(image())
+            Ok(Loaded {
+                image: image(),
+                save: None,
+            })
         }
     }
     #[test]
@@ -493,6 +570,77 @@ mod tests {
         *gate.0.lock().unwrap() = true;
         gate.1.notify_all();
         drop(service);
+    }
+    #[test]
+    fn visible_art_downloads_while_speculative_work_is_blocked() {
+        let (tx, rx) = mpsc::sync_channel(8);
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let service = Service::spawn(
+            egui::Context::default(),
+            64,
+            Arc::new(Mock {
+                started: tx,
+                gate: gate.clone(),
+            }),
+        );
+        let mut desired = HashMap::from([
+            ("slow-neighbor-a".into(), PREFETCH),
+            ("slow-neighbor-b".into(), PREFETCH),
+        ]);
+        assert!(service.submit(&desired, 64));
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .starts_with("slow-")
+        );
+        desired.insert("visible".into(), PREFETCH + 1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !service.submit(&desired, 64) {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let result = service.rx.recv_timeout(Duration::from_secs(2));
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        assert_eq!(result.unwrap().url, "visible");
+    }
+
+    #[test]
+    fn sends_decoded_art_before_cache_persistence_finishes() {
+        // Model the persistence gate with a mutex, keeping the fake loader Sync.
+        struct LoaderWithWrite(Mutex<mpsc::Receiver<()>>);
+        impl Loader for LoaderWithWrite {
+            fn disk(&self, _: &str) -> Result<Option<Loaded>> {
+                Ok(Some(Loaded {
+                    image: image(),
+                    save: Some(CacheWrite {
+                        thumbnail: PathBuf::new(),
+                        original: None,
+                    }),
+                }))
+            }
+            fn network(&self, _: &str) -> Result<Loaded> {
+                unreachable!()
+            }
+            fn persist(&self, _: CacheWrite, _: &ArtData, _: u64) {
+                let _ = self.0.lock().unwrap().recv_timeout(Duration::from_secs(5));
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        let service = Service::spawn(
+            egui::Context::default(),
+            64,
+            Arc::new(LoaderWithWrite(Mutex::new(rx))),
+        );
+        let desired = HashMap::from([("visible".into(), PREFETCH + 1)]);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !service.submit(&desired, 64) {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let result = service.rx.recv_timeout(Duration::from_secs(2));
+        let _ = tx.send(());
+        assert_eq!(result.unwrap().url, "visible");
     }
     #[test]
     fn thumbnail_round_trip_preserves_pixels_and_corruption_is_rejected() {

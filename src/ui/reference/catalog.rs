@@ -156,17 +156,15 @@ impl App {
         let height = if compact { 95. } else { 110. };
         let (r, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-        if !ui.is_rect_visible(r) {
-            return;
-        }
-        if response.hovered() {
-            ui.painter()
-                .rect_filled(r, 6, Color32::from_white_alpha(12));
-        }
         let art = Track {
             cover: item.cover.clone(),
             ..Default::default()
         };
+        if !ui.is_rect_visible(r) {
+            self.prefetch_cover_near(ui, r, &art, art_size);
+            return;
+        }
+        design::row_hover(ui, &response, Color32::TRANSPARENT);
         let cover = Rect::from_min_size(
             pos2(r.left() + 10., r.center().y - art_size * 0.5),
             vec2(art_size, art_size),
@@ -191,7 +189,7 @@ impl App {
             None
         };
         let card_clicked = if let Some(key) = &collection_key {
-            self.card_controls(ui, cover, ui.rect_contains_pointer(r), key, true)
+            self.card_controls(ui, cover, &response, key, true)
         } else {
             false
         };

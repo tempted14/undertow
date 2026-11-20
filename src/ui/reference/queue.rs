@@ -364,9 +364,7 @@ impl App {
             self.prefetch_cover(track, 58., ui.ctx().pixels_per_point());
             return false;
         }
-        if response.hovered() {
-            ui.painter().rect_filled(r, 8, Color32::from_white_alpha(8));
-        }
+        design::row_hover(ui, &response, Color32::TRANSPARENT);
         let cover = Rect::from_min_size(r.min + vec2(2., 6.), vec2(58., 58.));
         let art = at(ui, cover, ("queue-cover", list, index), |ui| {
             self.cover(ui, track, 58.)

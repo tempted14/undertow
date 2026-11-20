@@ -1,4 +1,4 @@
-use super::interactions::ListAction;
+use super::interactions::{ListAction, artwork_play_overlay};
 use super::*;
 use crate::discovery::{Feed, Item, Section};
 
@@ -232,17 +232,19 @@ impl App {
     fn discovery_card(&mut self, ui: &mut egui::Ui, item: &Item, size: f32) {
         ui.push_id(item.key(), |ui| {
             let (r, response) = ui.allocate_exact_size(vec2(size, size + 65.), Sense::click());
-            if !ui.is_rect_visible(r) {
-                return;
-            }
-            if item.catalog.kind != "Artist" {
-                response.context_menu(|ui| self.discovery_item_menu(ui, item));
-            }
-            let cover = Rect::from_min_size(r.min, vec2(size, size));
             let art = Track {
                 cover: item.catalog.cover.clone(),
                 ..Default::default()
             };
+            if !ui.is_rect_visible(r) {
+                self.prefetch_cover_near(ui, r, &art, size);
+                return;
+            }
+            design::row_hover(ui, &response, Color32::TRANSPARENT);
+            if item.catalog.kind != "Artist" {
+                response.context_menu(|ui| self.discovery_item_menu(ui, item));
+            }
+            let cover = Rect::from_min_size(r.min, vec2(size, size));
             let art_response = at(ui, cover, "art", |ui| {
                 self.cover_with_radius(
                     ui,
@@ -255,33 +257,18 @@ impl App {
                     },
                 )
             });
-            let mut controls = false;
-            if matches!(item.catalog.kind.as_str(), "Album" | "Playlist") {
-                controls =
-                    self.card_controls(ui, cover, ui.rect_contains_pointer(r), &item.key(), false);
-            } else if ui.rect_contains_pointer(r) {
-                let play =
-                    Rect::from_min_size(cover.left_bottom() + vec2(12., -60.), vec2(48., 48.));
-                ui.painter()
-                    .circle_filled(play.center(), 24., Color32::WHITE);
-                paint_icon(ui.painter(), play.shrink(10.), "play", Color32::BLACK);
-                if ui
-                    .interact(
-                        play,
-                        Id::new(("discovery-play", item.key())),
-                        Sense::click(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
-                    controls = true;
-                    if item.catalog.kind == "Mix" {
-                        self.list_action(item.key(), ListAction::Play);
-                    } else {
-                        self.open_discovery_item(item);
-                    }
+            let controls = if matches!(item.catalog.kind.as_str(), "Album" | "Playlist") {
+                self.card_controls(ui, cover, &response, &item.key(), false)
+            } else {
+                let clicked = artwork_play_overlay(ui, &response, cover, false)
+                    .is_some_and(|(play, _)| play.clicked());
+                if clicked && item.catalog.kind == "Mix" {
+                    self.list_action(item.key(), ListAction::Play);
+                } else if clicked {
+                    self.open_discovery_item(item);
                 }
-            }
+                clicked
+            };
             at(
                 ui,
                 Rect::from_min_max(r.min + vec2(0., size + 12.), r.max),
@@ -328,30 +315,35 @@ impl App {
                             vec2(width, if shortcuts { 79. } else { 86. }),
                             Sense::click(),
                         );
+                        let size = if shortcuts { 58. } else { 74. };
+                        let art = Track {
+                            cover: item.catalog.cover.clone(),
+                            ..Default::default()
+                        };
                         if !ui.is_rect_visible(r) {
+                            self.prefetch_cover_near(ui, r, &art, size);
                             return;
                         }
-                        if !matches!(item.catalog.kind.as_str(), "Artist" | "My Tracks") {
+                        let has_menu =
+                            !matches!(item.catalog.kind.as_str(), "Artist" | "My Tracks");
+                        if has_menu {
                             response.context_menu(|ui| self.discovery_item_menu(ui, item));
                         }
-                        if shortcuts || response.hovered() {
-                            ui.painter().rect_filled(
-                                r,
-                                8,
-                                if response.hovered() {
-                                    design::HOVER
-                                } else {
-                                    design::SURFACE
-                                },
-                            );
-                        }
-                        let size = if shortcuts { 58. } else { 74. };
+                        let hovered = design::row_hover(
+                            ui,
+                            &response,
+                            if shortcuts {
+                                design::SURFACE
+                            } else {
+                                Color32::TRANSPARENT
+                            },
+                        );
                         let padding = if shortcuts { 10. } else { 0. };
                         let cover = Rect::from_min_size(
                             pos2(r.left() + padding, r.center().y - size * 0.5),
                             vec2(size, size),
                         );
-                        if item.catalog.kind == "My Tracks" {
+                        let art_clicked = if item.catalog.kind == "My Tracks" {
                             let mut colors = egui::Mesh::default();
                             for (point, color) in [
                                 (cover.left_top(), Color32::from_rgb(83, 112, 192)),
@@ -380,14 +372,12 @@ impl App {
                                 font(9., true),
                                 TEXT,
                             );
+                            false
                         } else {
-                            at(ui, cover, "art", |ui| {
+                            let art_button = at(ui, cover, "art", |ui| {
                                 self.cover_with_radius(
                                     ui,
-                                    &Track {
-                                        cover: item.catalog.cover.clone(),
-                                        ..Default::default()
-                                    },
+                                    &art,
                                     size,
                                     if item.catalog.kind == "Artist" {
                                         (size / 2.) as u8
@@ -396,7 +386,12 @@ impl App {
                                     },
                                 )
                             });
-                        }
+                            let clicked = art_button.clicked();
+                            if has_menu {
+                                art_button.context_menu(|ui| self.discovery_item_menu(ui, item));
+                            }
+                            clicked
+                        };
                         let text = Rect::from_min_max(
                             r.min
                                 + vec2(
@@ -429,19 +424,22 @@ impl App {
                                 label(ui, subtitle, 14., false, GREY);
                             }
                         });
-                        let mut played = false;
-                        if matches!(
-                            item.catalog.kind.as_str(),
-                            "Album" | "Playlist" | "My Tracks"
-                        ) {
-                            played = self.card_controls(
-                                ui,
-                                cover,
-                                ui.rect_contains_pointer(r),
-                                &item.key(),
-                                true,
-                            );
-                        }
+                        let played = match item.catalog.kind.as_str() {
+                            "Album" | "Playlist" | "My Tracks" => {
+                                self.card_controls(ui, cover, &response, &item.key(), true)
+                            }
+                            "Track" | "Mix" => {
+                                let clicked = artwork_play_overlay(ui, &response, cover, true)
+                                    .is_some_and(|(play, _)| play.clicked());
+                                if clicked && item.catalog.kind == "Mix" {
+                                    self.list_action(item.key(), ListAction::Play);
+                                } else if clicked {
+                                    self.open_discovery_item(item);
+                                }
+                                clicked
+                            }
+                            _ => false,
+                        };
                         let title = ui
                             .interact(
                                 text,
@@ -452,7 +450,31 @@ impl App {
                         let liked = shortcuts
                             && item.catalog.kind == "Playlist"
                             && self.inline_favorite(ui, r, &item.key());
-                        if !played && !liked && (response.clicked() || title.clicked()) {
+                        let mut menu_clicked = false;
+                        if !shortcuts && has_menu {
+                            let menu_rect = Rect::from_center_size(
+                                r.right_center() - vec2(23., 0.),
+                                Vec2::splat(34.),
+                            );
+                            let more = ui
+                                .interact(
+                                    menu_rect,
+                                    response.id.with("recent-menu"),
+                                    Sense::click(),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text("More");
+                            if hovered {
+                                paint_icon(ui.painter(), menu_rect.shrink(7.), "dots", GREY);
+                            }
+                            menu_clicked = more.clicked();
+                            egui::Popup::menu(&more).show(|ui| self.discovery_item_menu(ui, item));
+                        }
+                        if !played
+                            && !liked
+                            && !menu_clicked
+                            && (response.clicked() || title.clicked() || art_clicked)
+                        {
                             self.open_discovery_item(item);
                         }
                     });

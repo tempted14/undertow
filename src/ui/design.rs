@@ -41,6 +41,25 @@ pub(super) fn browse_margin(width: f32) -> f32 {
     (width * 0.047).clamp(24., 92.)
 }
 
+/// Hover follows the row's bounds, including nested covers, links and buttons.
+pub(super) fn row_hover(ui: &egui::Ui, row: &egui::Response, base: Color32) -> bool {
+    let hovered = ui.is_enabled() && ui.rect_contains_pointer(row.rect);
+    let fill = if !hovered {
+        base
+    } else if base == Color32::TRANSPARENT {
+        Color32::from_white_alpha(16)
+    } else {
+        base.lerp_to_gamma(Color32::WHITE, 0.065)
+    };
+    if fill != Color32::TRANSPARENT {
+        ui.painter().rect_filled(row.rect, 6, fill);
+    }
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    hovered
+}
+
 pub(super) fn skeleton(ui: &mut egui::Ui, width: f32) {
     let visible = width.max(0.);
     let tiles = ((visible / 145.) as usize).clamp(2, 5);
@@ -55,5 +74,48 @@ pub(super) fn skeleton(ui: &mut egui::Ui, width: f32) {
             4,
             SURFACE,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{CentralPanel, Context, Event, RawInput, Sense, pos2};
+
+    #[test]
+    fn row_stays_highlighted_over_a_nested_control() {
+        let ctx = Context::default();
+        let mut states = Vec::new();
+        for pointer in [pos2(36., 46.), pos2(172., 46.), pos2(265., 46.)] {
+            let output = ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0., 0.), vec2(320., 120.))),
+                    events: vec![Event::PointerMoved(pointer)],
+                    ..RawInput::default()
+                },
+                |ctx| {
+                    CentralPanel::default().show(ctx, |ui| {
+                        let row = ui.interact(
+                            Rect::from_min_size(pos2(20., 20.), vec2(200., 54.)),
+                            ui.id().with("row"),
+                            Sense::click(),
+                        );
+                        let menu = ui.interact(
+                            Rect::from_min_size(pos2(156., 32.), vec2(32., 28.)),
+                            row.id.with("menu"),
+                            Sense::click(),
+                        );
+                        states.push((row_hover(ui, &row, Color32::TRANSPARENT), menu.hovered()));
+                    });
+                },
+            );
+            if pointer.x < 220. {
+                assert_eq!(
+                    output.platform_output.cursor_icon,
+                    egui::CursorIcon::PointingHand
+                );
+            }
+        }
+        assert_eq!(states, [(true, false), (true, true), (false, false)]);
     }
 }

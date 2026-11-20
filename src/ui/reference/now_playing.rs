@@ -107,10 +107,7 @@ impl App {
                                 if !ui.is_rect_visible(r) {
                                     continue;
                                 }
-                                if response.hovered() {
-                                    ui.painter()
-                                        .rect_filled(r, 8, Color32::from_white_alpha(12));
-                                }
+                                design::row_hover(ui, &response, Color32::TRANSPARENT);
                                 let art = at(
                                     ui,
                                     Rect::from_min_size(r.min + vec2(8., 8.), vec2(64., 64.)),

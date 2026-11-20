@@ -525,13 +525,10 @@ impl App {
                 for (i, track) in artist.tracks.iter().take(count).enumerate() {
                     let (r, response) = ui.allocate_exact_size(vec2(width, 72.), Sense::click());
                     if !ui.is_rect_visible(r) {
-                        self.prefetch_cover(track, 54., ui.ctx().pixels_per_point());
+                        self.prefetch_cover_near(ui, r, track, 54.);
                         continue;
                     }
-                    if response.hovered() {
-                        ui.painter()
-                            .rect_filled(r, 4, Color32::from_white_alpha(12));
-                    }
+                    design::row_hover(ui, &response, Color32::TRANSPARENT);
                     let cover = Rect::from_min_size(r.min + vec2(0., 8.), vec2(54., 54.));
                     let art = at(ui, cover, ("artist-track-art", artist.id, i), |ui| {
                         self.cover(ui, track, 54.)
@@ -840,13 +837,7 @@ impl App {
                 self.cover_with_radius(ui, &art, size, 5)
             });
             let key = format!("album:{}", album.id);
-            let controls = self.card_controls(
-                &mut cell,
-                cover,
-                ui.rect_contains_pointer(cover),
-                &key,
-                false,
-            );
+            let controls = self.card_controls(&mut cell, cover, &response, &key, false);
             let caption = Rect::from_min_max(card.min + vec2(0., size + 12.), card.max);
             at(&mut cell, caption, "caption", |ui| {
                 self.track_title(

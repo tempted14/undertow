@@ -200,17 +200,15 @@ impl App {
                             let playing = self.playing_playlist.as_ref() == Some(&playlist.id)
                                 && self.audio.is_some()
                                 && !self.paused();
-                            if response.hovered() || selected {
-                                ui.painter().rect_filled(
-                                    row,
-                                    design::CONTROL,
-                                    if selected {
-                                        design::SELECTED
-                                    } else {
-                                        design::SURFACE
-                                    },
-                                );
-                            }
+                            design::row_hover(
+                                ui,
+                                &response,
+                                if selected {
+                                    design::SELECTED
+                                } else {
+                                    Color32::TRANSPARENT
+                                },
+                            );
                             let size = if collapsed { 38. } else { 47. };
                             let cover = Rect::from_center_size(
                                 pos2(
@@ -271,13 +269,8 @@ impl App {
                             } else {
                                 false
                             };
-                            let control_clicked = self.card_controls(
-                                ui,
-                                cover,
-                                ui.rect_contains_pointer(row),
-                                &playlist.id,
-                                true,
-                            );
+                            let control_clicked =
+                                self.card_controls(ui, cover, &response, &playlist.id, true);
                             if !control_clicked
                                 && (response.clicked() || art.clicked() || text_clicked)
                             {

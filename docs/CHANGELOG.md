@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-11-20
+
+- Show decoded artwork immediately and save its disk cache in the background. Keep a download worker available for visible artwork when prefetch requests are already running.
+- Reuse cached artwork across display sizes and prefetch nearby covers as you scroll Home and Search.
+- Keep hover highlights steady over artwork, links, and menus in Recently Played, track lists, the sidebar, and the queue. Keep hover animations independent when the same item appears in multiple shelves.
+- Cover artwork delivery, download priority, and nested hover targets with regression tests.
+
 ## 0.3.0 — 2026-11-18
 
 - Align the Windows desktop layout, typography, and controls with the installed TIDAL 2.48.0 reference. Keep the native Rust renderer, Undertow branding, and plugin controls.

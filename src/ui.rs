@@ -1512,17 +1512,26 @@ impl App {
         // Keep layout/hit areas intact, but do not fetch or touch offscreen artwork.
         let bounds = Rect::from_min_size(ui.next_widget_position(), vec2(size, size));
         if !ui.is_rect_visible(bounds) {
-            if bounds.intersects(ui.clip_rect().expand2(vec2(0., 160.))) {
-                self.prefetch_cover(t, size, ui.ctx().pixels_per_point());
-            }
+            self.prefetch_cover_near(ui, bounds, t, size);
             return ui.allocate_exact_size(vec2(size, size), Sense::click()).1;
         }
         let mut texture = None;
         if self.settings.show_covers {
             let side = artwork_side(size, ui.ctx().pixels_per_point());
             if let Some(url) = artwork_key(t, side) {
-                self.art_visible.insert(url.clone());
-                if !self.artwork.contains_key(&url) {
+                let retained = if self.artwork.contains_key(&url) {
+                    Some(url.clone())
+                } else {
+                    // An already-resident image one size up is sharp enough.
+                    // Keep the limit tight so small rows cannot pin large covers.
+                    (side < 640)
+                        .then(|| artwork_key(t, side * 2))
+                        .flatten()
+                        .filter(|key| self.artwork.contains_key(key))
+                };
+                self.art_visible
+                    .insert(retained.as_ref().unwrap_or(&url).clone());
+                if retained.is_none() {
                     let priority = if self
                         .current
                         .as_ref()
@@ -1541,10 +1550,13 @@ impl App {
                         .and_modify(|p| *p = (*p).max(priority))
                         .or_insert(priority);
                 }
-                let available = std::iter::once(side)
-                    .chain([640, 320, 160, 80].into_iter().filter(|s| *s != side))
-                    .filter_map(|s| artwork_key(t, s))
-                    .find(|key| self.artwork.contains_key(key));
+                let available = retained.or_else(|| {
+                    [640, 320, 160, 80]
+                        .into_iter()
+                        .filter(|s| *s != side && *s != side * 2)
+                        .filter_map(|s| artwork_key(t, s))
+                        .find(|key| self.artwork.contains_key(key))
+                });
                 if let Some(key) = available
                     && let Some(art) = self.artwork.get_mut(&key)
                 {
@@ -1566,7 +1578,7 @@ impl App {
                 return response;
             }
             let p = ui.painter();
-            p.rect_filled(rect, 10, Color32::from_rgb(25, 40, 46));
+            p.rect_filled(rect, radius, Color32::from_rgb(25, 40, 46));
             p.circle_stroke(
                 rect.center(),
                 size * 0.28,
@@ -1643,7 +1655,14 @@ impl App {
         if let Some(url) = artwork_key(track, artwork_side(size, pixels_per_point))
             && !self.artwork.contains_key(&url)
         {
-            self.art_requests.entry(url).or_insert(1);
+            self.art_requests
+                .entry(url)
+                .or_insert(crate::worker::artwork::PREFETCH);
+        }
+    }
+    fn prefetch_cover_near(&mut self, ui: &egui::Ui, bounds: Rect, track: &Track, size: f32) {
+        if bounds.intersects(ui.clip_rect().expand2(vec2(0., 160.))) {
+            self.prefetch_cover(track, size, ui.ctx().pixels_per_point());
         }
     }
     fn background(&mut self, ctx: &egui::Context) {

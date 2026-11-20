@@ -407,56 +407,22 @@ impl App {
         &mut self,
         ui: &mut egui::Ui,
         rect: Rect,
-        hovered: bool,
+        row: &egui::Response,
         key: &str,
         compact: bool,
     ) -> bool {
-        let amount =
-            ui.ctx()
-                .animate_bool_with_time(Id::new(("card-hover", key, compact)), hovered, 0.16);
-        let amount = layout::ease(amount);
-        if amount < 0.01 {
+        let Some((play, amount)) = artwork_play_overlay(ui, row, rect, compact) else {
             return false;
-        }
-        let play = if compact {
-            Rect::from_center_size(rect.center(), vec2(36., 36.))
-        } else {
-            Rect::from_min_size(
-                pos2(rect.left() + 12., rect.bottom() - 60. + (1. - amount) * 8.),
-                vec2(48., 48.),
-            )
         };
-        ui.painter()
-            .rect_filled(rect, 5, Color32::from_black_alpha((amount * 38.) as u8));
-        let response = ui
-            .interact(play, Id::new(("card-play", key, compact)), Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        let scale =
-            ui.ctx()
-                .animate_bool_with_time(response.id.with("hover"), response.hovered(), 0.12);
-        let visual = play.expand(layout::ease(scale) * 2.);
-        if !compact {
-            ui.painter().circle_filled(
-                visual.center(),
-                visual.width() * 0.5,
-                Color32::from_white_alpha((amount * 255.) as u8),
-            );
-        }
-        paint_icon(
-            ui.painter(),
-            visual.shrink(if compact { 4. } else { 9. }),
-            "play",
-            if compact { TEXT } else { Color32::BLACK },
-        );
-        let mut clicked = response.on_hover_text("Play now").clicked();
+        let y = play.rect.center().y;
+        let mut clicked = play.clicked();
         if clicked {
             self.list_action(key.into(), ListAction::Play);
         }
         if !compact {
-            let heart =
-                Rect::from_center_size(pos2(rect.right() - 34., play.center().y), vec2(40., 40.));
+            let heart = Rect::from_center_size(pos2(rect.right() - 34., y), vec2(40., 40.));
             let response = ui
-                .interact(heart, Id::new(("card-heart", key)), Sense::click())
+                .interact(heart, row.id.with("card-heart"), Sense::click())
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             ui.painter().circle_filled(
                 heart.center(),
@@ -468,7 +434,7 @@ impl App {
                 ui.painter(),
                 heart.shrink(10.),
                 if saved { "heart" } else { "heart-outline" },
-                TEXT,
+                Color32::from_white_alpha((amount * 255.) as u8),
             );
             if response
                 .on_hover_text(if saved {
@@ -484,4 +450,60 @@ impl App {
         }
         clicked
     }
+}
+
+pub(super) fn artwork_play_overlay(
+    ui: &egui::Ui,
+    row: &egui::Response,
+    rect: Rect,
+    compact: bool,
+) -> Option<(egui::Response, f32)> {
+    let hovered = ui.is_enabled() && ui.rect_contains_pointer(row.rect);
+    // The same album can appear in several shelves. Scope the transition to
+    // this rendered card so they don't toggle each other's animation.
+    let amount = layout::ease(ui.ctx().animate_bool_with_time(
+        row.id.with("cover-hover"),
+        hovered,
+        design::FAST,
+    ));
+    if amount < 0.01 {
+        return None;
+    }
+    let play = if compact {
+        Rect::from_center_size(rect.center(), Vec2::splat(36.))
+    } else {
+        Rect::from_min_size(
+            pos2(rect.left() + 12., rect.bottom() - 60. + (1. - amount) * 8.),
+            Vec2::splat(48.),
+        )
+    };
+    let button = ui
+        .interact(play, row.id.with("cover-play"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Play now");
+    let alpha = (amount * 255.) as u8;
+    ui.painter().rect_filled(
+        rect,
+        design::ART,
+        Color32::from_black_alpha((amount * 70.) as u8),
+    );
+    let visual = play.expand(if button.hovered() { 1.5 } else { 0. });
+    if !compact {
+        ui.painter().circle_filled(
+            visual.center(),
+            visual.width() * 0.5,
+            Color32::from_white_alpha(alpha),
+        );
+    }
+    paint_icon(
+        ui.painter(),
+        visual.shrink(if compact { 4. } else { 9. }),
+        "play",
+        if compact {
+            Color32::from_white_alpha(alpha)
+        } else {
+            Color32::from_black_alpha(alpha)
+        },
+    );
+    Some((button, amount))
 }

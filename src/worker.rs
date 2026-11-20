@@ -93,9 +93,10 @@ impl Event {
         }
     }
 }
+#[derive(Clone)]
 pub struct ArtData {
-    pub cover: egui::ColorImage,
-    pub blur: egui::ColorImage,
+    pub cover: Arc<egui::ColorImage>,
+    pub blur: Arc<egui::ColorImage>,
     pub palette: [u8; 3],
 }
 pub struct PlaylistImage {
@@ -362,7 +363,7 @@ fn playlist_covers(mut playlists: Vec<Playlist>) -> Vec<Playlist> {
     playlists
 }
 
-fn decode_art(bytes: Vec<u8>, target_side: u32) -> anyhow::Result<ArtData> {
+fn decode_art(bytes: &[u8], target_side: u32) -> anyhow::Result<ArtData> {
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(4096);
@@ -396,11 +397,14 @@ fn decode_art(bytes: Vec<u8>, target_side: u32) -> anyhow::Result<ArtData> {
     }
     let palette = sums.map(|s| (s / weight.max(1)).min(255) as u8);
     Ok(ArtData {
-        cover: egui::ColorImage::from_rgba_unmultiplied(
+        cover: Arc::new(egui::ColorImage::from_rgba_unmultiplied(
             [img.width() as usize, img.height() as usize],
             img.as_raw(),
-        ),
-        blur: egui::ColorImage::from_rgba_unmultiplied([48, 48], blurred.as_raw()),
+        )),
+        blur: Arc::new(egui::ColorImage::from_rgba_unmultiplied(
+            [48, 48],
+            blurred.as_raw(),
+        )),
         palette,
     })
 }
@@ -503,8 +507,8 @@ mod artwork_memory_tests {
             .write_to(&mut bytes, image::ImageFormat::Png)
             .unwrap();
         let bytes = bytes.into_inner();
-        let small = super::decode_art(bytes.clone(), 80).unwrap();
-        let large = super::decode_art(bytes, 640).unwrap();
+        let small = super::decode_art(&bytes, 80).unwrap();
+        let large = super::decode_art(&bytes, 640).unwrap();
         assert_eq!(small.cover.size, [80, 80]);
         assert_eq!(large.cover.size, [640, 640]);
         assert_eq!(small.blur.size, [48, 48]);

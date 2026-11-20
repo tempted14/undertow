@@ -180,16 +180,18 @@ impl App {
                             }
                             let playing = self.current.as_ref().is_some_and(|c| c.id == t.id)
                                 && self.audio.is_some();
-                            if response.hovered() || playing {
-                                ui.painter().rect_filled(
-                                    row,
-                                    4,
-                                    Color32::from_white_alpha(if playing { 14 } else { 8 }),
-                                );
-                            }
+                            let hovered = design::row_hover(
+                                ui,
+                                &response,
+                                if playing {
+                                    Color32::from_white_alpha(14)
+                                } else {
+                                    Color32::TRANSPARENT
+                                },
+                            );
                             let color = if playing { AQUA } else { TEXT };
                             let leading_play = collection || album;
-                            let show_leading_play = response.hovered() || playing;
+                            let show_leading_play = hovered || playing;
                             if !leading_play || !show_leading_play {
                                 ui.painter().text(
                                     row.min + vec2(15., 32.),
