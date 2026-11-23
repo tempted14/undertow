@@ -4,7 +4,7 @@ Outputs use ignored artifacts/performance storage with an isolated account-free 
 """
 from pathlib import Path
 import argparse,runpy,sys,os,json,subprocess,hashlib,math,struct,wave
-cases=[('tracks','spaced',['--preview-library']),('line-lyrics','spaced',['--lyrics']),('word-lyrics','words',['--lyrics']),('gpu-line-lyrics','spaced',['--lyrics','--gpu-benchmark']),('gpu-word-lyrics','words',['--lyrics','--gpu-benchmark']),('high-rate-tracks','high-rate',['--preview-library'])]
+cases=[('tracks','spaced',['--preview-library']),('line-lyrics','spaced',['--lyrics']),('gpu-line-lyrics','spaced',['--lyrics','--gpu-benchmark']),('high-rate-tracks','high-rate',['--preview-library'])]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('phase');parser.add_argument('executable');parser.add_argument('--only-gpu',action='store_true')
 parser.add_argument('--cases',nargs='+',choices=[c[0] for c in cases],help='Run named cases and retain other results from this phase for the same executable.')
@@ -15,8 +15,7 @@ if not exe.is_file():parser.error('Executable does not exist')
 root=Path(__file__).resolve().parents[1];work=root/'artifacts/performance';work.mkdir(parents=True,exist_ok=True);out=work/phase;out.mkdir(exist_ok=True)
 fixture=work/'fixture';fixture.mkdir(exist_ok=True);runpy.run_path(str(root/'scripts/ui-smoke.py'))['fixtures'](fixture)
 (fixture/'spaced.wav').write_bytes((fixture/'motion.wav').read_bytes());(fixture/'spaced.png').write_bytes((fixture/'motion.png').read_bytes());(fixture/'spaced.lrc').write_text('\n'.join(f'[00:{i:02d}.00]Original steady lyric line {i}, flowing between changes' for i in range(0,45,6)),encoding='utf-8')
-(fixture/'words.wav').write_bytes((fixture/'motion.wav').read_bytes());(fixture/'words.png').write_bytes((fixture/'motion.png').read_bytes());(fixture/'words.lrc').write_text('\n'.join(f'[00:{i:02d}.00]<00:{i:02d}.00>Original <00:{i+1:02d}.00>word <00:{i+2:02d}.00>timing <00:{i+3:02d}.00>fixture' for i in range(0,40,6)),encoding='utf-8')
-selected=[c for c in cases if (c[0] in args.cases if args.cases else cases.index(c)<4) and (not args.only_gpu or c[0].startswith('gpu-'))]
+selected=[c for c in cases if (c[0] in args.cases if args.cases else c[1]!='high-rate') and (not args.only_gpu or c[0].startswith('gpu-'))]
 if not selected:parser.error('No matching cases selected')
 if any(c[1]=='high-rate' for c in selected) and not (fixture/'high-rate.wav').exists():
  second=b''.join(struct.pack('<ii',int(40000000*math.sin(2*math.pi*220*i/192000)),int(30000000*math.sin(2*math.pi*330*i/192000))) for i in range(192000))

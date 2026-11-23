@@ -10,7 +10,6 @@ pub(super) mod forms;
 mod home_motion;
 pub(in crate::ui) mod layout;
 mod lyric_navigation;
-pub(super) mod lyric_words;
 mod queue;
 mod seek_bar;
 use layout::{PlayerLayout, columns, reserved_player};
@@ -1414,7 +1413,6 @@ impl App {
             },
         );
         let idle_color = Color32::from_white_alpha(155);
-        let unlit_color = Color32::from_white_alpha(125);
         let mut seek_request = None;
         at(ui, lyrics_rect, "lyrics-lines", |ui| {
             if data.lines.is_empty() {
@@ -1446,7 +1444,6 @@ impl App {
             if self.lyric_layout_key != Some(key) {
                 self.lyric_offsets.clear();
                 self.lyric_galleys.clear();
-                self.lyric_word_fragments = None;
                 self.lyric_offsets.push(0.);
                 for line in &data.lines {
                     let size = crate::lyric_fonts::measure(
@@ -1583,14 +1580,6 @@ impl App {
                         })
                         .clone();
                     let active_line = active == Some(i);
-                    if active_line
-                        && self.audio.is_some()
-                        && !self.paused()
-                        && data.next_visual_change(position, self.settings.animated_lyrics)
-                            == Some(0.)
-                    {
-                        self.lyric_frame_motion = true;
-                    }
                     let area = Rect::from_min_size(
                         origin + vec2(0., offsets[i]),
                         vec2(text_width, offsets[i + 1] - offsets[i]),
@@ -1599,7 +1588,11 @@ impl App {
                         ui.set_clip_rect(area.expand2(vec2(7., 6.)).intersect(lyrics_rect));
                         let edge_distance = (area.top() + galley.size().y - lyrics_rect.top())
                             .min(lyrics_rect.bottom() - area.top());
-                        ui.multiply_opacity(layout::ease(edge_distance / 108.));
+                        let fully_visible = area.top() >= lyrics_rect.top()
+                            && area.top() + galley.size().y <= lyrics_rect.bottom();
+                        if !(active_line && fully_visible && !self.lyric_manual_scroll) {
+                            ui.multiply_opacity(layout::ease(edge_distance / 108.));
+                        }
                         let emphasis = if !data.synced {
                             1.
                         } else if self.settings.animated_lyrics {
@@ -1622,50 +1615,27 @@ impl App {
                         let color = resting.lerp_to_gamma(text_color, emphasis);
                         let glow = (data.synced && self.settings.lyric_glow && emphasis > 0.01)
                             .then(|| glow_color.gamma_multiply(emphasis));
-                        let (response, word_seek) = if active_line && !line.words.is_empty() {
-                            let words = &mut self.lyric_word_fragments;
-                            if words.as_ref().is_none_or(|words| words.index != i) {
-                                *words = Some(lyric_words::WordLayout::new(i, line, &galley));
-                            }
-                            words.as_ref().unwrap().paint(
-                                ui,
-                                &galley,
-                                line,
-                                position,
-                                self.settings.animated_lyrics,
-                                lyric_words::Colors {
-                                    resting: unlit_color,
-                                    fill: color,
-                                    glow,
-                                },
-                            )
-                        } else {
-                            let blur = (data.synced
-                                && !active_line
-                                && glow.is_none()
-                                && self.settings.lyric_motion_blur
-                                && self.settings.lyric_blur_strength > 0.)
-                                .then(|| {
-                                    let strength = self.settings.lyric_blur_strength.clamp(0., 1.);
-                                    LyricBlur {
-                                        radius: 3.5 * (1. - emphasis) * strength,
-                                        trail: (self.lyric_velocity * 0.006).clamp(-8., 8.)
-                                            * strength,
-                                    }
-                                });
-                            (lyric_galley(ui, galley, color, glow, blur), None)
-                        };
+                        let blur = (data.synced
+                            && !active_line
+                            && glow.is_none()
+                            && self.settings.lyric_motion_blur
+                            && self.settings.lyric_blur_strength > 0.)
+                            .then(|| {
+                                let strength = self.settings.lyric_blur_strength.clamp(0., 1.);
+                                LyricBlur {
+                                    radius: 3.5 * (1. - emphasis) * strength,
+                                    trail: (self.lyric_velocity * 0.006).clamp(-8., 8.) * strength,
+                                }
+                            });
+                        let response = lyric_galley(ui, galley, color, glow, blur);
                         response.context_menu(|ui| {
                             if self.settings.copy_lyrics && ui.button("Copy this line").clicked() {
                                 ui.ctx().copy_text(line.text.clone());
                                 ui.close();
                             }
                         });
-                        if data.synced
-                            && self.audio.is_some()
-                            && (word_seek.is_some() || response.clicked())
-                        {
-                            seek_request = Some(word_seek.unwrap_or(line.start));
+                        if data.synced && self.audio.is_some() && response.clicked() {
+                            seek_request = Some(line.start);
                         }
                         if self.translated {
                             let second = if self.settings.romanize {

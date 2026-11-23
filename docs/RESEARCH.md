@@ -38,7 +38,7 @@ The Windows protocol self-test now exercises both the previous loopback relay an
 ## Lyrics, presence, and resource control
 
 - [LRCLIB API](https://lrclib.net/docs) provides plain/synced lyrics; genuine timing is preserved. Plain text is never given invented timestamps.
-- The requested Radiant and translation sources were inspected. The main Radiant provider relies on credentials injected at its build time; those are not public app configuration and are not copied. Its documented public fallback can fail. Translation uses the upstream plugin's unofficial Google endpoint with explicit on-demand activation and exact per-line alignment.
+- The requested Radiant and translation sources were inspected. The main Radiant provider relies on credentials injected at its build time; those are not public app configuration and are not copied. The app uses TIDAL and LRCLIB for online line timing. Translation uses the upstream plugin's unofficial Google endpoint with explicit on-demand activation and exact per-line alignment.
 - [Discord Rich Presence documentation](https://discord.com/developers/docs/rich-presence/overview): a public developer application identity and local IPC are used, without a Discord user/bot token. Activity acknowledgment is verified rather than inferred from a pipe write.
 - Audio decode is performed off the audio callback. PCM capacity is bounded, encoded data is disk-spooled, artwork texture count is capped, lyrics/artwork disk caches are bounded, inactive track pages are evicted, and idle repainting is delayed. A native lyric child is measured along with the parent.
 

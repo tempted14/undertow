@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4 — 2026-11-22
+
+- Remove word and syllable highlighting and their timing lookups. Lyrics highlight the whole line and retain click-to-seek, manual scrolling, and Resync.
+- Use a soft glow around the active lyric line at every display scale.
+- Add the Undertow wave icon to the Windows executable and taskbar.
+
 ## 0.3.3 — 2026-11-22
 
 - Collection opens beside the sidebar with Mixes & Radio, Playlists, Albums, Tracks, and Save for Later. Playlists and saved albums have browsable artwork grids.

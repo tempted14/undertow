@@ -4,6 +4,7 @@
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Vec2};
 use std::sync::Arc;
 
+mod halo;
 #[cfg(windows)]
 pub(crate) mod native;
 
@@ -21,6 +22,10 @@ impl From<Arc<egui::Galley>> for Layout {
 }
 
 impl Layout {
+    pub fn paint_halo(&self, painter: &egui::Painter, origin: Pos2, color: Color32) {
+        halo::paint(self, painter, origin, color);
+    }
+
     pub fn size(&self) -> Vec2 {
         match self {
             Self::Atlas(line) => line.size(),
@@ -35,45 +40,6 @@ impl Layout {
             }
             #[cfg(windows)]
             Self::Native(line) => line.paint(painter, origin, color),
-        }
-    }
-    /// Each hit is a visual fragment, with direction, of one logical UTF-8 range.
-    /// Keeping the whole line shaped preserves joining and ligatures at word edges.
-    pub fn fragments(&self, byte_start: usize, byte_end: usize) -> Arc<[(Rect, bool)]> {
-        match self {
-            #[cfg(windows)]
-            Self::Native(line) => line.fragments(byte_start, byte_end),
-            Self::Atlas(line) => {
-                let Some(prefix) = line.text().get(..byte_start) else {
-                    return Arc::default();
-                };
-                let Some(word) = line.text().get(byte_start..byte_end) else {
-                    return Arc::default();
-                };
-                let start = prefix.chars().count();
-                let end = start + word.chars().count();
-                let mut offset = 0;
-                let mut fragments = Vec::new();
-                for row in &line.rows {
-                    let first = start.saturating_sub(offset);
-                    let last = end.saturating_sub(offset).min(row.glyphs.len());
-                    if first < last {
-                        let bounds = row.rect();
-                        fragments.push((
-                            Rect::from_min_max(
-                                egui::pos2(row.pos.x + row.x_offset(first), bounds.top()),
-                                egui::pos2(row.pos.x + row.x_offset(last), bounds.bottom()),
-                            ),
-                            false,
-                        ));
-                    }
-                    offset += row.glyphs.len() + usize::from(row.ends_with_newline);
-                    if offset >= end {
-                        break;
-                    }
-                }
-                fragments.into()
-            }
         }
     }
 }
@@ -119,48 +85,8 @@ fn requires_shaping(text: &str) -> bool {
     })
 }
 
-/// Match sequential word-provider text without using byte counts as UTF-16 indices.
-pub fn word_range(text: &str, word: &str, cursor: &mut usize) -> Option<std::ops::Range<usize>> {
-    let word = word.trim();
-    if word.is_empty() || !text.is_char_boundary(*cursor) {
-        return None;
-    }
-    let start = *cursor + text.get(*cursor..)?.find(word)?;
-    let end = start + word.len();
-    *cursor = end;
-    Some(start..end)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn word_fragments_follow_the_wrapped_line_geometry() {
-        let ctx = egui::Context::default();
-        let text = "Écho Écho\nlast";
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            let layout = Layout::Atlas(ctx.fonts_mut(|fonts| {
-                fonts.layout(text.into(), FontId::proportional(24.), Color32::WHITE, 72.)
-            }));
-            let mut cursor = 0;
-            let hits: Vec<_> = ["Écho", "Écho", "last"]
-                .into_iter()
-                .map(|word| {
-                    let range = word_range(text, word, &mut cursor).unwrap();
-                    let fragments = layout.fragments(range.start, range.end);
-                    assert_eq!(fragments.len(), 1);
-                    assert!(!fragments[0].1);
-                    fragments[0].0
-                })
-                .collect();
-            assert!(hits.windows(2).all(|pair| pair[0].top() < pair[1].top()));
-            assert!(
-                hits.iter()
-                    .all(|hit| hit.width() > 0. && hit.bottom() <= layout.size().y)
-            );
-        });
-    }
     #[test]
     fn complex_scripts_and_combining_marks_use_contextual_layout() {
         for text in [
@@ -189,20 +115,5 @@ mod tests {
         ] {
             assert!(!super::requires_shaping(text), "{text}");
         }
-    }
-    #[test]
-    fn repeated_unicode_word_ranges_keep_original_byte_boundaries() {
-        let text = "ਪਿਆਰ ਪਿਆਰ 🌊";
-        let mut cursor = 0;
-        let first = super::word_range(text, "ਪਿਆਰ ", &mut cursor).unwrap();
-        let second = super::word_range(text, "ਪਿਆਰ", &mut cursor).unwrap();
-        assert_eq!(&text[first.clone()], "ਪਿਆਰ");
-        assert_eq!(&text[second.clone()], "ਪਿਆਰ");
-        assert!(second.start > first.end);
-        assert_eq!(
-            &text[super::word_range(text, "🌊", &mut cursor).unwrap()],
-            "🌊"
-        );
-        assert!(super::word_range(text, "missing", &mut cursor).is_none());
     }
 }

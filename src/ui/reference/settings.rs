@@ -737,15 +737,8 @@ impl App {
             switch(
                 ui,
                 "Cover-colored glow",
-                "Tint only the halo. Keep the sung words bright white unless you select a custom text color.",
+                "Tint the halo using the current cover. The active line uses your text color.",
                 &mut self.settings.lyric_cover_color,
-            );
-            divider(ui);
-            switch(
-                ui,
-                "Radiant Lyrics",
-                "Use genuine word or syllable timing when available.",
-                &mut self.settings.radiant_provider,
             );
             divider(ui);
             switch(

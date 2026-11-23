@@ -32,6 +32,7 @@ fn lyrics_header(
     selected_tab: usize,
     hidden: bool,
     can_resync: bool,
+    lyrics_status: &str,
 ) -> Option<LyricsAction> {
     let names = [
         "Similar tracks",
@@ -130,7 +131,12 @@ fn lyrics_header(
                 },
             );
         }
-        if response.on_hover_text(*name).clicked() {
+        let tooltip = if i == 2 && !lyrics_status.is_empty() {
+            lyrics_status
+        } else {
+            name
+        };
+        if response.on_hover_text(tooltip).clicked() {
             return Some(match i {
                 3 => LyricsAction::Resync,
                 4 => LyricsAction::Hide,
@@ -338,7 +344,14 @@ impl App {
         let enabled = self.current.is_some()
             && !self.busy
             && (self.lyric_manual_scroll || !self.lyric_request.pending);
-        match lyrics_header(ui, page, self.now_tab, self.lyrics_chrome_hidden, enabled) {
+        match lyrics_header(
+            ui,
+            page,
+            self.now_tab,
+            self.lyrics_chrome_hidden,
+            enabled,
+            &self.lyrics_status,
+        ) {
             Some(LyricsAction::Tab(i)) if i != self.now_tab => {
                 self.now_tab = i;
                 self.tab_started = Instant::now();
@@ -552,7 +565,8 @@ mod tests {
                     },
                     |ctx| {
                         egui::CentralPanel::default().show(ctx, |ui| {
-                            action = lyrics_header(ui, page, 2, hidden, enabled).or(action.take());
+                            action =
+                                lyrics_header(ui, page, 2, hidden, enabled, "").or(action.take());
                         });
                     },
                 );

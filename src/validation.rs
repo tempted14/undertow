@@ -187,11 +187,11 @@ pub fn run(path: &Path, playlist_writes: bool) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
         report["seek_verified"] = json!(audio.position() >= 10.5);
         audio.sink.pause();
-        let fetched = lyrics::fetch(&track, Some(&mut tidal), true);
+        let fetched = lyrics::fetch(&track, Some(&mut tidal));
         match fetched {
             Ok(l) => {
-                report["lyrics"] = json!({"source":l.source,"lines":l.lines.len(),"word_synced":l.word_synced(),"synced":l.synced});
-                let _ = lyrics::save(&track, &l);
+                report["lyrics"] =
+                    json!({"source":l.source,"lines":l.lines.len(),"synced":l.synced});
                 report["translation"] = match lyrics::translate(&l, "es", false) {
                     Ok(translated) => json!({"succeeded":true,"lines":translated.lines.len()}),
                     Err(e) => json!({"succeeded":false,"error":e.to_string()}),

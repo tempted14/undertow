@@ -27,6 +27,39 @@ pub(crate) fn software_mode() -> bool {
             && !std::env::args().any(|a| a == "--gpu-benchmark"))
 }
 
+#[cfg(windows)]
+fn set_taskbar_icon(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::{
+        Win32::{
+            Foundation::{HINSTANCE, HWND, LPARAM, WPARAM},
+            System::LibraryLoader::GetModuleHandleW,
+            UI::WindowsAndMessaging::{ICON_BIG, LoadIconW, SendMessageW, WM_SETICON},
+        },
+        core::PCWSTR,
+    };
+    let Ok(handle) = cc.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(window) = handle.as_raw() else {
+        return;
+    };
+    // egui sets the small window icon. Windows uses the big icon on the taskbar.
+    unsafe {
+        let resource = PCWSTR(std::ptr::without_provenance(1));
+        if let Ok(module) = GetModuleHandleW(PCWSTR::null())
+            && let Ok(icon) = LoadIconW(Some(HINSTANCE(module.0)), resource)
+        {
+            SendMessageW(
+                HWND(window.hwnd.get() as *mut _),
+                WM_SETICON,
+                Some(WPARAM(ICON_BIG as usize)),
+                Some(LPARAM(icon.0 as isize)),
+            );
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--validate-discovery") {
@@ -206,6 +239,10 @@ fn main() {
     }
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_title("Undertow · TIDAL")
+        .with_icon(
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/undertow.png"))
+                .expect("Bundled Undertow icon"),
+        )
         .with_inner_size(
             args.iter()
                 .position(|a| a == "--window-size")
@@ -247,7 +284,11 @@ fn main() {
     if let Err(e) = eframe::run_native(
         "Undertow",
         options,
-        Box::new(move |cc| Ok(Box::new(ui::App::new(&cc.egui_ctx, &args)))),
+        Box::new(move |cc| {
+            #[cfg(windows)]
+            set_taskbar_icon(cc);
+            Ok(Box::new(ui::App::new(&cc.egui_ctx, &args)))
+        }),
     ) {
         eprintln!("Undertow failed to start: {e}");
         std::process::exit(1);

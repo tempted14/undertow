@@ -14,7 +14,7 @@ Sessions are encrypted for the signed-in Windows user with DPAPI. Do not share s
 
 - Personalized Music discovery, saved tracks, playlists, native album/artist browsing, live search previews, sorting and filtering.
 - Native streaming playback, seeking, queue/history, shuffle/repeat, metadata/quality information and authorized downloads.
-- Synchronized lyrics with word and syllable highlighting when timing is available, manual scrolling/resync, cover themes, configurable glow, Unicode font fallback and floating lyrics.
+- Line-synced lyrics with click-to-seek, manual scrolling and Resync, cover themes, configurable glow, Unicode font fallback and floating lyrics.
 - Editable playlists, local cover customization, profile customization, responsive layouts and keyboard shortcuts.
 - Minimal Discord listening activity and all existing native plugin controls.
 

@@ -310,81 +310,34 @@ impl IDWriteTextRenderer_Impl for Renderer_Impl {
     }
 }
 
-type FragmentCache = Mutex<HashMap<(usize, usize), Arc<[(Rect, bool)]>>>;
-
 pub struct Line {
     pub size: Vec2,
-    text: String,
-    layout: IDWriteTextLayout,
-    left: f32,
     texture: TextureHandle,
+    alpha: image::GrayImage,
     scale: f32,
-    hits: FragmentCache,
 }
 
 impl Line {
+    pub(super) fn halo_mask(&self) -> (&image::GrayImage, f32) {
+        (&self.alpha, self.scale)
+    }
+    pub(super) fn texture_offset(&self) -> Vec2 {
+        vec2(-PAD, -PAD)
+    }
+    fn bytes(&self) -> usize {
+        self.alpha.as_raw().len() * 5
+    }
+
     pub fn paint(&self, painter: &egui::Painter, origin: Pos2, color: Color32) {
         painter.image(
             self.texture.id(),
             Rect::from_min_size(
-                origin - vec2(PAD, PAD),
+                origin + self.texture_offset(),
                 self.texture.size_vec2() / self.scale,
             ),
             Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
             color,
         );
-    }
-    pub fn fragments(&self, start: usize, end: usize) -> Arc<[(Rect, bool)]> {
-        if let Ok(hits) = self.hits.lock()
-            && let Some(cached) = hits.get(&(start, end))
-        {
-            return cached.clone();
-        }
-        let fragments: Arc<[(Rect, bool)]> = self.resolve_fragments(start, end).into();
-        if let Ok(mut hits) = self.hits.lock()
-            && hits.len() < 512
-        {
-            hits.insert((start, end), fragments.clone());
-        }
-        fragments
-    }
-    fn resolve_fragments(&self, start: usize, end: usize) -> Vec<(Rect, bool)> {
-        let Some((prefix, range)) = self.text.get(..start).zip(self.text.get(start..end)) else {
-            return Vec::new();
-        };
-        let offset = prefix.encode_utf16().count() as u32;
-        let length = range.encode_utf16().count() as u32;
-        if length == 0 {
-            return Vec::new();
-        }
-        unsafe {
-            let mut count = 0;
-            // The initial call reports required capacity with E_NOT_SUFFICIENT_BUFFER.
-            let _ = self
-                .layout
-                .HitTestTextRange(offset, length, -self.left, 0., None, &mut count);
-            if count == 0 || count > 4096 {
-                return Vec::new();
-            }
-            let mut hits = vec![DWRITE_HIT_TEST_METRICS::default(); count as usize];
-            if self
-                .layout
-                .HitTestTextRange(offset, length, -self.left, 0., Some(&mut hits), &mut count)
-                .is_err()
-            {
-                return Vec::new();
-            }
-            hits.into_iter()
-                .take(count as usize)
-                .filter(|h| h.isText.as_bool())
-                .map(|h| {
-                    (
-                        Rect::from_min_size(pos2(h.left, h.top), vec2(h.width, h.height)),
-                        h.bidiLevel % 2 == 1,
-                    )
-                })
-                .collect()
-        }
     }
 }
 
@@ -422,9 +375,7 @@ impl Cache {
                 .map(|(k, _)| k.clone())
                 .unwrap();
             if let Some((line, _)) = self.lines.remove(&key) {
-                self.bytes = self
-                    .bytes
-                    .saturating_sub(line.texture.size()[0] * line.texture.size()[1] * 4);
+                self.bytes = self.bytes.saturating_sub(line.bytes());
             }
         }
     }
@@ -460,23 +411,27 @@ pub fn cached(ctx: &egui::Context, text: &str, size: f32, width: f32) -> Option<
         *touched = now;
         return Some(line.clone());
     }
-    let (layout, metrics, image, _) = cache.engine()?.raster(text, size, width, scale).ok()?;
-    let bytes = image.pixels.len() * 4;
-    cache.evict(bytes);
+    let (_, metrics, image, _) = cache.engine()?.raster(text, size, width, scale).ok()?;
+    let alpha = image::GrayImage::from_raw(
+        image.size[0] as u32,
+        image.size[1] as u32,
+        image.pixels.iter().map(|pixel| pixel.a()).collect(),
+    )?;
+    let bytes = image.pixels.len() * 5;
     let line = Arc::new(Line {
         size: vec2(
             metrics.widthIncludingTrailingWhitespace.max(1.),
             metrics.height,
         ),
-        text: text.into(),
-        layout,
-        left: metrics.left,
         texture: ctx.load_texture("lyric-script", image, egui::TextureOptions::LINEAR),
+        alpha,
         scale,
-        hits: Mutex::default(),
     });
-    cache.lines.insert(key, (line.clone(), now));
-    cache.bytes += bytes;
+    if bytes <= BUDGET {
+        cache.evict(bytes);
+        cache.lines.insert(key, (line.clone(), now));
+        cache.bytes += bytes;
+    }
     Some(line)
 }
 
@@ -575,11 +530,6 @@ mod tests {
             let a = cached(ctx, "ਪੰਜਾਬੀ", 38., 500.).unwrap();
             let b = cached(ctx, "ਪੰਜਾਬੀ", 38., 500.).unwrap();
             assert!(Arc::ptr_eq(&a, &b));
-            assert!(!a.fragments(0, "ਪੰਜਾਬੀ".len()).is_empty());
-            assert!(Arc::ptr_eq(
-                &a.fragments(0, "ਪੰਜਾਬੀ".len()),
-                &a.fragments(0, "ਪੰਜਾਬੀ".len())
-            ));
             first = Some(a);
             for n in 0..80 {
                 cached(ctx, &format!("ਪੰਜਾਬੀ {n}"), 38., 500.).unwrap();
@@ -590,26 +540,6 @@ mod tests {
         });
         // External visible-line handles survive an LRU eviction without dangling textures.
         assert!(first.unwrap().texture.size()[0] > 0);
-    }
-    #[test]
-    fn bidi_word_fragments_use_utf16_positions_and_visual_direction() {
-        let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            let text = "مرحبا بالعالم";
-            let line = cached(ctx, text, 38., 500.).unwrap();
-            let first = line.fragments(0, "مرحبا".len());
-            let second = line.fragments("مرحبا ".len(), text.len());
-            assert!(!first.is_empty() && !second.is_empty());
-            assert!(first.iter().all(|(_, rtl)| *rtl));
-            assert!(first[0].0.left() > second[0].0.left());
-            let mixed = "🌊 ਪੰਜਾਬੀ";
-            let line = cached(ctx, mixed, 38., 500.).unwrap();
-            let hits = line.fragments("🌊 ".len(), mixed.len());
-            assert!(!hits.is_empty() && hits[0].0.width() > 20.);
-            assert!(!hits[0].1);
-            assert!(line.fragments(1, 2).is_empty());
-            assert!(line.fragments(0, 1000).is_empty());
-        });
     }
     #[test]
     fn optional_script_contact_sheet() {

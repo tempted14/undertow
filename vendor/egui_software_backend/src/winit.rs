@@ -191,6 +191,12 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
             .map_err(|ose| SoftwareBackendAppError::CreateWindowOs(Box::new(ose)))
             .map(Rc::new)?;
 
+        #[cfg(windows)]
+        if let Some(icon) = &self.config.viewport_builder.icon {
+            use winit::platform::windows::WindowExtWindows;
+            window
+                .set_taskbar_icon(Icon::from_rgba(icon.rgba.clone(), icon.width, icon.height).ok());
+        }
         window.set_resizable(resizable);
 
         Ok(WindowInitializedAppState {

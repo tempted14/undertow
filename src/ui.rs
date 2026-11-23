@@ -168,7 +168,6 @@ pub struct App {
     shuffle_on: bool,
     lyric_offsets: Vec<f32>,
     lyric_galleys: HashMap<usize, crate::lyric_fonts::Layout>,
-    lyric_word_fragments: Option<reference::lyric_words::WordLayout>,
     lyric_layout_key: Option<(u64, u32, u32, bool, usize, u32)>,
     lyric_scroll: f32,
     lyric_manual_scroll: bool,
@@ -550,30 +549,9 @@ fn paint_lyric_galley(
 ) {
     let galley = galley.into();
     if let Some(glow) = glow {
-        paint_lyric_halo(painter, origin, &galley, glow);
+        galley.paint_halo(painter, origin, glow);
     }
     galley.paint(painter, origin, color);
-}
-
-fn paint_lyric_halo(
-    painter: &egui::Painter,
-    origin: Pos2,
-    galley: &crate::lyric_fonts::Layout,
-    glow: Color32,
-) {
-    let [r, g, b, alpha] = glow.to_srgba_unmultiplied();
-    let tint = |strength: u16| {
-        Color32::from_rgba_unmultiplied(r, g, b, (strength * alpha as u16 / 255) as u8)
-    };
-    // The outer ring softens the edge while the inner ring keeps the glow visible.
-    let wide = tint(28);
-    for offset in [vec2(-6., -5.), vec2(6., -5.), vec2(-6., 5.), vec2(6., 5.)] {
-        galley.paint(painter, origin + offset, wide);
-    }
-    let tight = tint(54);
-    for offset in [vec2(-3., 0.), vec2(3., 0.), vec2(0., -3.), vec2(0., 3.)] {
-        galley.paint(painter, origin + offset, tight);
-    }
 }
 
 impl App {
@@ -739,7 +717,6 @@ impl App {
             shuffle_on: false,
             lyric_offsets: Vec::new(),
             lyric_galleys: HashMap::new(),
-            lyric_word_fragments: None,
             lyric_layout_key: None,
             lyric_scroll: 0.0,
             lyric_manual_scroll: false,
@@ -1012,7 +989,6 @@ impl App {
             }
         }
         self.lyric_scroll = 0.0;
-        self.lyric_word_fragments = None;
         self.lyric_jump = None;
         self.lyric_manual_scroll = false;
         self.lyric_velocity = 0.;
@@ -1416,13 +1392,7 @@ impl App {
                         self.lyrics_status = format!(
                             "{} · {}",
                             l.source,
-                            if l.word_synced() {
-                                "Word / syllable synced"
-                            } else if l.synced {
-                                "Line synced"
-                            } else {
-                                "Unsynced"
-                            }
+                            if l.synced { "Line synced" } else { "Unsynced" }
                         );
                         self.lyrics = Arc::new(l);
                     }
@@ -1934,7 +1904,7 @@ impl App {
     }
     fn save_report(&self) {
         let a = self.audio.as_ref();
-        let details = serde_json::json!({"authenticated":self.connected,"playback_active":a.is_some_and(|a|!a.sink.is_paused()&&!a.sink.empty()),"tidal_stream":self.current.as_ref().is_some_and(|t|t.id>0&&t.local_path.is_empty()),"muted":self.muted,"codec":a.map(|a|&a.format.codec),"sample_rate":a.map(|a|a.format.sample_rate),"bits":a.map(|a|a.format.bit_depth),"output_rate":a.map(|a|a.format.output_rate),"played_seconds":self.position(),"underrun_samples":a.map(|a|a.stats.underrun_samples.load(Ordering::Relaxed)),"lyrics_synchronized":self.lyrics.synced,"lyrics_source":self.lyrics.source,"lyric_lines":self.lyrics.lines.len(),"word_synced":self.lyrics.word_synced(),"discord_status":self.presence_status,"discord_acknowledged":self.presence_status=="Rich Presence active","artwork_textures":self.artwork.len(),"frosted_backdrop_active":self.settings.frosted_glass&&!self.artwork.is_empty(),"floating_lyrics_pid":serde_json::Value::Null,"floating_lyrics_in_process":self.overlay_window.as_ref().is_some_and(|w|w.is_alive()),"display_refresh_hz":self.display_refresh_hz,"renderer":if crate::software_mode(){ "software" }else{ "OpenGL" },"settings":self.settings.diagnostic(),"integrated_plugin_features":16,"all_16_live_validated":false,"limitations":"Account playlist round trips, protected/offline entitlement, remote lyric/translation providers and Discord acknowledgment must be validated with live accounts. Local playback measurements alone do not validate the requested full scenario."});
+        let details = serde_json::json!({"authenticated":self.connected,"playback_active":a.is_some_and(|a|!a.sink.is_paused()&&!a.sink.empty()),"tidal_stream":self.current.as_ref().is_some_and(|t|t.id>0&&t.local_path.is_empty()),"muted":self.muted,"codec":a.map(|a|&a.format.codec),"sample_rate":a.map(|a|a.format.sample_rate),"bits":a.map(|a|a.format.bit_depth),"output_rate":a.map(|a|a.format.output_rate),"played_seconds":self.position(),"underrun_samples":a.map(|a|a.stats.underrun_samples.load(Ordering::Relaxed)),"lyrics_synchronized":self.lyrics.synced,"lyrics_source":self.lyrics.source,"lyric_lines":self.lyrics.lines.len(),"discord_status":self.presence_status,"discord_acknowledged":self.presence_status=="Rich Presence active","artwork_textures":self.artwork.len(),"frosted_backdrop_active":self.settings.frosted_glass&&!self.artwork.is_empty(),"floating_lyrics_pid":serde_json::Value::Null,"floating_lyrics_in_process":self.overlay_window.as_ref().is_some_and(|w|w.is_alive()),"display_refresh_hz":self.display_refresh_hz,"renderer":if crate::software_mode(){ "software" }else{ "OpenGL" },"settings":self.settings.diagnostic(),"integrated_plugin_features":16,"all_16_live_validated":false,"limitations":"Account playlist round trips, protected/offline entitlement, remote lyric/translation providers and Discord acknowledgment must be validated with live accounts. Local playback measurements alone do not validate the requested full scenario."});
         let mut details = details;
         details["lyrics_ui_hidden"] =
             serde_json::json!(self.page == Page::Lyrics && self.lyrics_chrome_hidden);
@@ -1947,11 +1917,6 @@ impl App {
         details["lyric_jump_active"] = serde_json::json!(self.lyric_jump.is_some());
         details["ui_frames"] = serde_json::json!(self.frame);
         details["retained_lyric_layouts"] = serde_json::json!(self.lyric_galleys.len());
-        details["retained_lyric_word_layouts"] = serde_json::json!(
-            self.lyric_word_fragments
-                .as_ref()
-                .map_or(0, |words| words.len())
-        );
         details["lyric_manual_scroll"] = serde_json::json!(self.lyric_manual_scroll);
         details["lyric_scroll_offset"] = serde_json::json!(self.lyric_scroll);
         if let Page::Artist(id) = self.page {
@@ -2366,9 +2331,7 @@ impl App {
         ctx.request_repaint_after(if animating && self.settings.animated_lyrics {
             Duration::from_secs_f64(1.0 / self.settings.fps.clamp(30, 240) as f64)
         } else if self.audio.is_some() && !self.paused() {
-            let next = self
-                .lyrics
-                .next_visual_change(self.lyric_position(), self.settings.animated_lyrics);
+            let next = self.lyrics.next_line_change(self.lyric_position());
             Duration::from_secs_f64(next.filter(|n| *n > 0.).unwrap_or(0.2).clamp(0.001, 0.2))
         } else {
             Duration::from_secs(1)
@@ -2660,113 +2623,6 @@ mod performance_tests {
     }
 
     #[test]
-    fn retained_word_layouts_preserve_wrap_clip_glow_and_hit_rectangles() {
-        use eframe::egui::*;
-        use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
-        let render = |cached: bool, width: usize, fraction: f32| {
-            let ctx = Context::default();
-            assert!(super::load_font(&ctx, ""));
-            let mut rects = Vec::new();
-            let output = ctx.run(
-                RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width as f32, 240.))),
-                    ..Default::default()
-                },
-                |ctx| {
-                    CentralPanel::default().show(ctx, |ui| {
-                        let words = ["Flowing ", "lyrics ", "日本語 ", "stay ", "responsive"];
-                        let layouts: Vec<_> = if cached {
-                            words
-                                .iter()
-                                .map(|text| {
-                                    crate::lyric_fonts::layout(
-                                        ctx,
-                                        text,
-                                        FontId::new(38., FontFamily::Name("Bold".into())),
-                                        f32::INFINITY,
-                                    )
-                                })
-                                .collect()
-                        } else {
-                            vec![]
-                        };
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.;
-                            for (i, text) in words.iter().enumerate() {
-                                let word = if cached {
-                                    super::lyric_galley(
-                                        ui,
-                                        layouts[i].clone(),
-                                        Color32::from_white_alpha(125),
-                                        None,
-                                        None,
-                                    )
-                                } else {
-                                    super::lyric_text(
-                                        ui,
-                                        text,
-                                        38.,
-                                        Color32::from_white_alpha(125),
-                                        None,
-                                        false,
-                                        None,
-                                    )
-                                };
-                                rects.push(word.rect);
-                                let clip = Rect::from_min_max(
-                                    word.rect.min - vec2(6., 7.),
-                                    pos2(
-                                        word.rect.left() + word.rect.width() * fraction,
-                                        word.rect.bottom() + 7.,
-                                    ),
-                                );
-                                let painter =
-                                    ui.painter().with_clip_rect(ui.clip_rect().intersect(clip));
-                                let layout = if cached {
-                                    layouts[i].clone()
-                                } else {
-                                    crate::lyric_fonts::layout(
-                                        ctx,
-                                        text,
-                                        FontId::new(38., FontFamily::Name("Bold".into())),
-                                        f32::INFINITY,
-                                    )
-                                };
-                                if fraction > 0. {
-                                    super::paint_lyric_galley(
-                                        &painter,
-                                        word.rect.min,
-                                        layout,
-                                        Color32::WHITE,
-                                        Some(Color32::from_white_alpha(110)),
-                                    );
-                                }
-                            }
-                        });
-                    });
-                },
-            );
-            let jobs = ctx.tessellate(output.shapes, output.pixels_per_point);
-            let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
-            let mut pixels = vec![[0; 4]; width * 240];
-            renderer.render(
-                &mut BufferMutRef::new(&mut pixels, width, 240),
-                &jobs,
-                &output.textures_delta,
-                1.,
-            );
-            (rects, pixels)
-        };
-        for width in [300, 640] {
-            for fraction in [0., 0.35, 1.] {
-                assert_eq!(
-                    render(true, width, fraction),
-                    render(false, width, fraction)
-                );
-            }
-        }
-    }
-    #[test]
     fn retained_white_glyphs_preserve_the_current_text_color_pixel_for_pixel() {
         use eframe::egui::*;
         use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
@@ -2843,7 +2699,7 @@ mod performance_tests {
     }
 
     #[test]
-    fn progressive_lyric_glow_keeps_the_original_word_click_target() {
+    fn lyric_glow_keeps_the_line_click_target() {
         use eframe::egui::*;
         let ctx = Context::default();
         assert!(super::load_font(&ctx, ""));
@@ -2868,32 +2724,23 @@ mod performance_tests {
                 },
                 |ctx| {
                     CentralPanel::default().show(ctx, |ui| {
-                        let word =
-                            super::lyric_text(ui, "Timing", 48., Color32::GRAY, None, false, None);
-                        let painter = ui.painter().with_clip_rect(Rect::from_min_max(
-                            word.rect.min,
-                            word.rect.center_bottom(),
-                        ));
-                        let galley = painter.layout_no_wrap(
-                            "Timing".into(),
-                            FontId::new(48., FontFamily::Name("Bold".into())),
-                            Color32::WHITE,
-                        );
-                        super::paint_lyric_galley(
-                            &painter,
-                            word.rect.min,
-                            galley,
+                        let line = super::lyric_text(
+                            ui,
+                            "Timing",
+                            48.,
                             Color32::WHITE,
                             Some(Color32::LIGHT_BLUE),
+                            false,
+                            None,
                         );
-                        clicked |= word.clicked();
+                        clicked |= line.clicked();
                     });
                 },
             );
         }
         assert!(
             clicked,
-            "A decorative highlight must not steal click-to-seek from the word"
+            "A decorative highlight must not steal click-to-seek from the line"
         );
     }
     fn add_art(

@@ -2,14 +2,8 @@
 import argparse,json,math,os,struct,subprocess,tempfile,wave,zlib
 from pathlib import Path
 
-SCREENS=['home','tracks','playlist','album','collection-menu','collection-playlists','collection-albums','artist','search','search-preview','lyrics','syllable-lyrics','credits','similar','general','account','plugins','about','profile','queue','saved','create','edit','delete','volume','error']
+SCREENS=['home','tracks','playlist','album','collection-menu','collection-playlists','collection-albums','artist','search','search-preview','lyrics','credits','similar','general','account','plugins','about','profile','queue','saved','create','edit','delete','volume','error']
 
-def syllable_fixture():
-    parts = ['Gl','ow','ing ','em','bers ','drift']
-    return '\n'.join(
-        f'[00:{start:02d}.00]' + ''.join(f'<00:{start + i * .25:05.2f}>{part}' for i, part in enumerate(parts))
-        for start in range(0, 44, 2)
-    )
 def fixtures(folder):
     audio=folder/'motion.wav'
     with wave.open(str(audio),'wb') as f:
@@ -37,11 +31,7 @@ def main():
         folder=Path(temp);audio=fixtures(folder);data=folder/'data';data.mkdir()
         (data/'settings.json').write_text(json.dumps({'discord':False,'floating_lyrics':False,'everywhere':False,'profile_picture':False,'show_sidebar':a.sidebar,'fps':30,'download_dir':'Downloads'}),encoding='utf-8')
         env=os.environ.copy();env['UNDERTOW_DATA_DIR']=str(data)
-        lrc=audio.with_suffix('.lrc')
-        original=lrc.read_text(encoding='utf-8')
         for screen in a.screens:
-            lrc.write_text(syllable_fixture() if screen == 'syllable-lyrics' else original, encoding='utf-8')
-            preview='lyrics' if screen == 'syllable-lyrics' else screen
-            subprocess.run([str(exe),'--background-benchmark','--benchmark','6','--mute','--fps','30','--open',str(audio),'--preview-screen',preview,'--window-size',a.size,'--preview-scale',str(a.scale),'--report',str(out/(screen+'.json')),'--screenshot',str(out/(screen+'.png'))],env=env,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.BELOW_NORMAL_PRIORITY_CLASS,check=True,timeout=60)
+            subprocess.run([str(exe),'--background-benchmark','--benchmark','6','--mute','--fps','30','--open',str(audio),'--preview-screen',screen,'--window-size',a.size,'--preview-scale',str(a.scale),'--report',str(out/(screen+'.json')),'--screenshot',str(out/(screen+'.png'))],env=env,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.BELOW_NORMAL_PRIORITY_CLASS,check=True,timeout=60)
             print(screen+' rendered',flush=True)
 if __name__=='__main__':main()

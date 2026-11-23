@@ -1,6 +1,6 @@
 [package]
 name = "undertow"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 description = "A native, memory-conscious TIDAL music player for Windows"
 license = "MIT"
@@ -41,9 +41,13 @@ required-features = ["auth-broker"]
 
 [target.'cfg(windows)'.dependencies]
 memmap2 = "0.9"
+raw-window-handle = "0.6"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls_Dialogs", "Win32_Graphics_Gdi", "Win32_Graphics_DirectWrite", "Win32_System_LibraryLoader", "Win32_UI_HiDpi"] }
 windows-core = "0.62.2"
 winreg = "0.55"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.12"
 
 [profile.release]
 opt-level = 3

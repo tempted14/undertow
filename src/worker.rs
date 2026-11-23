@@ -220,32 +220,20 @@ if strict&&!p.format.lossless&&chosen.local_path.is_empty(){p.stats.cancel.store
                     }})?;
                 },
                 Command::Lyrics(gen_id,request,track,refresh)=>{
-                    let radiant = settings.radiant_provider;
-                    let mut cached = if refresh { None } else { lyrics::cached(&track) };
-                    if cached.as_ref().is_some_and(|l| !l.needs_timing_upgrade(radiant)) {
-                        emit(&etx,&ctx,Event::Lyrics(gen_id,request,Ok(cached.take().unwrap())));
+                    if !refresh && let Some(saved) = lyrics::cached(&track) {
+                        emit(&etx, &ctx, Event::Lyrics(gen_id, request, Ok(saved)));
                         return Ok(());
                     }
-                    let base = cached.or_else(|| {
-                        if track.local_path.is_empty() {
-                            tidal.as_mut()
-                                .and_then(|t| t.tidal_lyrics(track.id).ok())
-                                .and_then(lyrics::from_tidal)
-                        } else {
-                            None
-                        }
-                    });
-                    let events=etx.clone();let ctx=ctx.clone();
-                    std::thread::Builder::new().name("lyrics-fetch".into()).spawn(move||{
-                        // Show a usable first result while the optional timing lookup runs.
-                        let preview = base.as_ref().filter(|l| l.needs_timing_upgrade(radiant)).map(|l| {
-                            emit(&events, &ctx, Event::Lyrics(gen_id, request, Ok(l.clone())));
-                            l.timing_quality()
-                        });
-                        let result = lyrics::fetch_with_base(&track, base, radiant);
-                        if preview.is_none() || result.as_ref().is_ok_and(|l| l.timing_quality() > preview.unwrap_or(0)) {
-                            emit(&events, &ctx, Event::Lyrics(gen_id, request, result.map_err(|e| e.to_string())));
-                        }
+                    let base = if track.local_path.is_empty() {
+                        tidal.as_mut().and_then(|t| t.tidal_lyrics(track.id).ok()).and_then(lyrics::from_tidal)
+                    } else {
+                        None
+                    };
+                    let events = etx.clone();
+                    let ctx = ctx.clone();
+                    std::thread::Builder::new().name("lyrics-fetch".into()).spawn(move || {
+                        let result = lyrics::fetch_with_base(&track, base);
+                        emit(&events, &ctx, Event::Lyrics(gen_id, request, result.map_err(|e| e.to_string())));
                     })?;
                 },
                 Command::Translate(gen_id,request,l,lang,romanize)=>{let events=etx.clone();let ctx=ctx.clone();std::thread::Builder::new().name("lyrics-translate".into()).spawn(move||emit(&events,&ctx,Event::Lyrics(gen_id,request,lyrics::translate(&l,&lang,romanize).map_err(|e|e.to_string()))))?;},
