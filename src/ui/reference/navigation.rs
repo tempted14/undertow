@@ -3,6 +3,10 @@ use super::*;
 impl App {
     pub(super) fn navigation_sidebar(&mut self, ctx: &egui::Context) {
         if !self.settings.show_sidebar || self.page == Page::Lyrics {
+            if self.collection_flyout.open {
+                self.collection_flyout = Default::default();
+                ctx.animate_bool_with_time(Id::new("collection-slide"), false, 0.);
+            }
             return;
         }
         // Keep the user's full-width preference; narrow windows temporarily use the rail.
@@ -18,7 +22,8 @@ impl App {
                 0.
             },
         );
-        let width = 68. + (expanded - 68.) * layout::ease(progress);
+        let expansion = layout::ease(progress);
+        let width = 68. + (expanded - 68.) * expansion;
         let moving = progress > 0. && progress < 1.;
         let panel = egui::SidePanel::left("library-navigation")
             .resizable(!collapsed && !moving)
@@ -31,7 +36,7 @@ impl App {
             .frame(
                 Frame::new()
                     .fill(design::SIDEBAR)
-                    .inner_margin(Margin::symmetric(if collapsed { 9 } else { 21 }, 0)),
+                    .inner_margin(Margin::symmetric((9. + 12. * expansion).round() as i8, 0)),
             )
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0., 0.);
@@ -77,44 +82,50 @@ impl App {
                     self.settings.sidebar_collapsed = !self.settings.sidebar_collapsed;
                     self.schedule_settings_save();
                 }
-                for (glyph, title, page) in [
-                    ("music", "Music", Page::Home),
-                    ("collection", "Collection", Page::Favorites),
-                ] {
-                    let selected = match glyph {
-                        "music" => {
-                            matches!(
-                                self.page,
-                                Page::Home
-                                    | Page::Discovery(_)
-                                    | Page::Mix(_)
-                                    | Page::Playlist(_)
-                                    | Page::Album(..)
-                            )
-                        }
-                        "collection" => self.page == Page::Favorites,
-                        _ => false,
+                let mut collection_trigger = None;
+                for (glyph, title) in [("music", "Music"), ("collection", "Collection")] {
+                    let collection = glyph == "collection";
+                    let selected = if collection {
+                        matches!(self.page, Page::Favorites | Page::Collection(_))
+                            || self.collection_flyout.open
+                    } else {
+                        matches!(
+                            self.page,
+                            Page::Home
+                                | Page::Discovery(_)
+                                | Page::Mix(_)
+                                | Page::Playlist(_)
+                                | Page::Album(..)
+                        )
                     };
                     let (r, b) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 52.), Sense::click());
                     let b = b.on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if selected || b.hovered() {
+                    b.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title)
+                    });
+                    let hover = ctx.animate_bool_with_time(
+                        b.id.with("sidebar-hover"),
+                        b.hovered() || b.has_focus(),
+                        if self.settings.animated_lyrics {
+                            0.12 / self.settings.motion_speed
+                        } else {
+                            0.
+                        },
+                    );
+                    if selected || hover > 0. {
                         ui.painter().rect_filled(
                             r,
                             16,
                             if selected {
                                 design::SELECTED
                             } else {
-                                design::HOVER
+                                design::SURFACE.gamma_multiply(hover)
                             },
                         );
                     }
                     let c = pos2(
-                        if collapsed {
-                            r.center().x
-                        } else {
-                            r.left() + 27.
-                        },
+                        egui::lerp(r.center().x..=r.left() + 27., expansion),
                         r.center().y,
                     );
                     paint_icon(
@@ -123,34 +134,34 @@ impl App {
                         glyph,
                         if selected { design::BRAND } else { GREY },
                     );
-                    if !collapsed {
-                        ui.painter().text(
+                    let label_opacity = ((expansion - 0.25) / 0.5).clamp(0., 1.);
+                    if label_opacity > 0. {
+                        let painter = ui.painter().with_clip_rect(r);
+                        painter.text(
                             pos2(r.left() + 53., r.center().y),
                             Align2::LEFT_CENTER,
                             title,
                             font(17., true),
-                            if selected { TEXT } else { GREY },
+                            if selected { TEXT } else { GREY }.gamma_multiply(label_opacity),
                         );
-                        if glyph == "collection" {
+                        if collection {
                             paint_icon(
-                                ui.painter(),
+                                &painter,
                                 Rect::from_center_size(
                                     r.right_center() - vec2(20., 0.),
                                     vec2(18., 18.),
                                 ),
                                 "forward",
-                                GREY,
+                                GREY.gamma_multiply(label_opacity),
                             );
                         }
                     }
-                    if b.clicked() {
-                        self.page = page.clone();
+                    if collection {
+                        collection_trigger = Some(b);
+                    } else if b.clicked() {
+                        self.page = Page::Home;
                         self.search_preview = false;
-                        if self.connected && page == Page::Favorites {
-                            self.send(Command::Favorites);
-                        }
                     }
-                    b.on_hover_text(title);
                 }
                 ui.add_space(if collapsed { 16. } else { 26. });
                 if !collapsed {
@@ -315,9 +326,13 @@ impl App {
                             });
                         }
                     });
+                collection_trigger
             });
         if !collapsed && !moving {
             self.sidebar_expanded_width = panel.response.rect.width().clamp(234., maximum);
+        }
+        if let Some(trigger) = panel.inner {
+            self.sidebar_collection(&trigger, panel.response.rect.right());
         }
     }
 }

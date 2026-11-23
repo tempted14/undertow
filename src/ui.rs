@@ -34,6 +34,7 @@ enum Page {
     Home,
     Discovery(String),
     Mix(String),
+    Collection(reference::collection::View),
     Favorites,
     Playlist(String),
     Album(u64, String),
@@ -216,6 +217,8 @@ pub struct App {
     queue_button_rect: Option<Rect>,
     play_history: Arc<Vec<Track>>,
     collection: HashSet<String>,
+    collection_albums: Option<Result<Arc<Vec<Album>>, String>>,
+    collection_flyout: reference::collection::Flyout,
     collection_pending: HashSet<String>,
     motion_page: Page,
     motion_started: Instant,
@@ -790,6 +793,8 @@ impl App {
             queue_button_rect: None,
             play_history: Arc::new(Vec::new()),
             collection: HashSet::new(),
+            collection_albums: None,
+            collection_flyout: Default::default(),
             collection_pending: HashSet::new(),
             motion_page: Page::Home,
             motion_started: Instant::now(),
@@ -911,6 +916,11 @@ impl App {
             let message = "Please wait for the current requests to finish".to_owned();
             match command {
                 Command::Home => self.discovery.home_result(Err(message)),
+                Command::CollectionState
+                    if self.collection_albums.as_ref().is_none_or(Result::is_err) =>
+                {
+                    self.collection_albums = Some(Err(message));
+                }
                 Command::DiscoverySection(section) => {
                     self.discovery.section_result(section.id, Err(message))
                 }
@@ -1224,6 +1234,7 @@ impl App {
                 Event::DiscoverySection(id, result) => self.discovery.section_result(id, result),
                 Event::Connected(s) => {
                     self.albums.clear();
+                    self.collection_albums = None;
                     self.discovery = Default::default();
                     self.artists.clear();
                     self.artist_access.clear();
@@ -1241,6 +1252,9 @@ impl App {
                 }
                 Event::SignedOut => {
                     self.albums.clear();
+                    self.collection_albums = None;
+                    self.collection.clear();
+                    self.collection_pending.clear();
                     self.device_prompt = None;
                     self.manual_prompt = None;
                     zeroize::Zeroize::zeroize(&mut self.manual_return);
@@ -1403,7 +1417,7 @@ impl App {
                             "{} · {}",
                             l.source,
                             if l.word_synced() {
-                                "Word synced"
+                                "Word / syllable synced"
                             } else if l.synced {
                                 "Line synced"
                             } else {
@@ -1426,6 +1440,16 @@ impl App {
                 }
                 Event::Collection(key, saved) => {
                     self.collection_pending.remove(&key);
+                    if let Some(id) = key
+                        .strip_prefix("album:")
+                        .and_then(|id| id.parse::<u64>().ok())
+                    {
+                        if saved {
+                            self.send(Command::CollectionState);
+                        } else if let Some(Ok(albums)) = &mut self.collection_albums {
+                            Arc::make_mut(albums).retain(|album| album.id != id);
+                        }
+                    }
                     if saved {
                         self.collection.insert(key);
                     } else {
@@ -1444,10 +1468,18 @@ impl App {
                     self.collection_pending.remove(&key);
                     self.toast(error, true);
                 }
-                Event::CollectionState(keys) => {
-                    self.collection.retain(|k| !k.starts_with("album:"));
-                    self.collection.extend(keys);
-                }
+                Event::CollectionState(result) => match result {
+                    Ok(albums) => {
+                        self.collection.retain(|k| !k.starts_with("album:"));
+                        self.collection
+                            .extend(albums.iter().map(|album| format!("album:{}", album.id)));
+                        self.collection_albums = Some(Ok(Arc::new(albums)));
+                    }
+                    Err(error) if self.collection_albums.as_ref().is_some_and(Result::is_ok) => {
+                        self.toast(error, true);
+                    }
+                    Err(error) => self.collection_albums = Some(Err(error)),
+                },
                 Event::Credits(id, result) => {
                     if self.credits.len() >= 12 {
                         self.credits.clear();
@@ -2096,10 +2128,6 @@ impl App {
             };
             let _ = self.presence_tx.try_send(snapshot);
         }
-        if self.page != self.motion_page {
-            self.motion_page = self.page.clone();
-            self.motion_started = Instant::now();
-        }
         // Keep audio, requests and floating lyrics serviced, but do not build and
         // tessellate the entire invisible interface while the window is minimized.
         if self.benchmark.is_none() && ctx.input(|i| i.viewport().minimized == Some(true)) {
@@ -2119,28 +2147,36 @@ impl App {
         {
             self.album_track_reveal = None;
         }
-        let transition = if self.settings.animated_lyrics {
-            (self.motion_started.elapsed().as_secs_f32() * self.settings.motion_speed / 0.24)
-                .clamp(0., 1.)
-        } else {
-            1.
-        };
-        let eased = reference::layout::ease(transition);
         self.lyric_frame_motion = false;
         self.background(ctx);
         self.title_bar(ctx);
         self.player(ctx);
         self.sidebar(ctx);
+        // Take the destination after the player and sidebar have handled input.
+        // A route changed while drawing the content starts on the next frame.
+        let page = self.page.clone();
+        if page != self.motion_page {
+            self.motion_page = page.clone();
+            self.motion_started = Instant::now();
+        }
+        let transition = if self.settings.animated_lyrics {
+            (self.motion_started.elapsed().as_secs_f32() * self.settings.motion_speed / 0.19)
+                .clamp(0., 1.)
+        } else {
+            1.
+        };
+        let eased = reference::layout::ease(transition);
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(Color32::TRANSPARENT)
                     .inner_margin(Margin::symmetric(
                         if matches!(
-                            self.page,
+                            page,
                             Page::Home
                                 | Page::Discovery(_)
                                 | Page::Mix(_)
+                                | Page::Collection(_)
                                 | Page::Favorites
                                 | Page::Lyrics
                                 | Page::Playlist(_)
@@ -2158,13 +2194,13 @@ impl App {
             )
             .show(ctx, |ui| {
                 let mut screen = ui.max_rect();
-                if self.page != Page::Lyrics {
+                if page != Page::Lyrics {
                     screen.max.x -= 12.; // Keep scrollbars clear of the window resize border.
                 }
-                let offset = if self.page == Page::Lyrics {
-                    vec2(0., 36. * (1. - eased))
+                let offset = if page == Page::Lyrics {
+                    vec2(0., 22. * (1. - eased))
                 } else {
-                    vec2(22. * (1. - eased), 0.)
+                    vec2(10. * (1. - eased), 0.)
                 };
                 let mut content = ui.new_child(
                     egui::UiBuilder::new()
@@ -2172,14 +2208,14 @@ impl App {
                         .max_rect(screen.translate(offset)),
                 );
                 content.set_clip_rect(screen.intersect(ui.clip_rect()));
-                content.set_opacity(0.45 + 0.55 * eased);
-                if !matches!(self.page, Page::Lyrics | Page::Artist(_) | Page::Album(..)) {
+                content.set_opacity(0.7 + 0.3 * eased);
+                if !matches!(page, Page::Lyrics | Page::Artist(_) | Page::Album(..)) {
                     self.toolbar(&mut content);
                 }
                 let mut docked;
                 let window = ctx.content_rect();
                 let ui = if self.queue_open
-                    && self.page != Page::Lyrics
+                    && page != Page::Lyrics
                     && reference::layout::queue_docked(window)
                 {
                     let mut work = content.available_rect_before_wrap();
@@ -2198,10 +2234,11 @@ impl App {
                 } else {
                     &mut content
                 };
-                match self.page.clone() {
+                match page {
                     Page::Home => self.home_viewport(ui),
                     Page::Discovery(id) => self.reference_discovery(ui, &id),
                     Page::Mix(id) => self.reference_mix(ui, &id),
+                    Page::Collection(view) => self.collection_view(ui, view),
                     Page::Favorites => self.reference_favorites(ui),
                     Page::Playlist(id) => {
                         let p = self
@@ -2245,7 +2282,7 @@ impl App {
             ctx.request_repaint_after(Duration::from_millis(8));
         }
         self.record_artwork_scroll(ctx);
-        if transition < 1. {
+        if self.page != self.motion_page {
             ctx.request_repaint();
         }
         if self.screenshot.is_some()

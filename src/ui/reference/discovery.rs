@@ -36,6 +36,7 @@ fn shelf_arrow(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui::Response 
 #[derive(Default)]
 pub(in crate::ui) struct State {
     pub feed: Arc<Feed>,
+    pub mixes: Arc<Vec<Item>>,
     pub attempted: bool,
     pub loading: bool,
     pub error: Option<String>,
@@ -61,6 +62,17 @@ impl State {
         self.attempted = true;
         match result {
             Ok(feed) => {
+                let mut seen = HashSet::new();
+                self.mixes = Arc::new(
+                    feed.sections
+                        .iter()
+                        .flat_map(|section| section.items.iter())
+                        .filter(|item| {
+                            item.catalog.kind == "Mix" && seen.insert(item.catalog.id.as_str())
+                        })
+                        .cloned()
+                        .collect(),
+                );
                 self.feed = Arc::new(feed);
                 self.loaded = Some(Instant::now());
                 self.error = None;
@@ -229,7 +241,7 @@ impl App {
             ui.add_space(if section.shortcuts { 46. } else { 48. });
         }
     }
-    fn discovery_card(&mut self, ui: &mut egui::Ui, item: &Item, size: f32) {
+    pub(super) fn discovery_card(&mut self, ui: &mut egui::Ui, item: &Item, size: f32) {
         ui.push_id(item.key(), |ui| {
             let (r, response) = ui.allocate_exact_size(vec2(size, size + 65.), Sense::click());
             let art = Track {

@@ -152,6 +152,40 @@ pub struct Album {
     pub release_type: String,
 }
 
+impl Album {
+    pub fn from_v1(v: &serde_json::Value) -> Self {
+        let artist = v
+            .get("artist")
+            .or_else(|| v.pointer("/artists/0"))
+            .unwrap_or(&serde_json::Value::Null);
+        Self {
+            id: v["id"].as_u64().unwrap_or(0),
+            title: v["title"].as_str().unwrap_or("").into(),
+            artist: artist["name"].as_str().unwrap_or("").into(),
+            artist_picture: artist["picture"].as_str().unwrap_or("").into(),
+            cover: v["cover"].as_str().unwrap_or("").into(),
+            year: v["releaseDate"]
+                .as_str()
+                .unwrap_or("")
+                .chars()
+                .take(4)
+                .collect(),
+            quality: if v
+                .pointer("/mediaMetadata/tags")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|t| t.iter().any(|t| t == "HIRES_LOSSLESS"))
+            {
+                "HI_RES_LOSSLESS".into()
+            } else {
+                v["audioQuality"].as_str().unwrap_or("").into()
+            },
+            copyright: v["copyright"].as_str().unwrap_or("").into(),
+            explicit: v["explicit"].as_bool().unwrap_or(false),
+            release_type: v["type"].as_str().unwrap_or("").into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CreditGroup {
     pub role: String,

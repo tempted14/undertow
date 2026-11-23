@@ -744,7 +744,7 @@ impl App {
             switch(
                 ui,
                 "Radiant Lyrics",
-                "Try the public word-timed lyric provider when cached or TIDAL lyrics are unavailable.",
+                "Use genuine word or syllable timing when available.",
                 &mut self.settings.radiant_provider,
             );
             divider(ui);

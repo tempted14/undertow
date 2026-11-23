@@ -95,9 +95,9 @@ impl Reader {
                             Command::Favorites => {
                                 deliver(Event::Tracks("favorites".into(), job.tidal.favorites()?))
                             }
-                            Command::CollectionState => {
-                                deliver(Event::CollectionState(job.tidal.collection_state()?))
-                            }
+                            Command::CollectionState => deliver(Event::CollectionState(
+                                job.tidal.collection_state().map_err(|e| e.to_string()),
+                            )),
                             Command::Home => {
                                 deliver(Event::Home(job.tidal.home().map_err(|e| e.to_string())))
                             }
@@ -224,6 +224,7 @@ impl Reader {
             let message = "Please wait for the current catalog requests, then try again".to_owned();
             let event = match job.command {
                 Command::Home => Event::Home(Err(message)),
+                Command::CollectionState => Event::CollectionState(Err(message)),
                 Command::Mix(id) => Event::Mix(id, Err(message)),
                 Command::DiscoverySection(section) => {
                     Event::DiscoverySection(section.id, Err(message))

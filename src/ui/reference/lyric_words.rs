@@ -87,7 +87,7 @@ impl WordLayout {
                 seek = Some(word.start);
             }
             let fraction = if animated {
-                ((position - word.start) / (word.end - word.start).max(0.06)).clamp(0., 1.) as f32
+                ((position - word.start) / (word.end_time() - word.start)).clamp(0., 1.) as f32
             } else {
                 f32::from(position >= word.start)
             };
@@ -131,6 +131,49 @@ impl WordLayout {
 mod tests {
     use super::*;
     use crate::lyrics::Word;
+
+    #[test]
+    fn two_syllables_share_one_word_layout_and_highlight_separately() {
+        let ctx = egui::Context::default();
+        let lyrics =
+            crate::lyrics::parse_lrc("[00:01.00]<00:01.00>Em<00:01.50>bers\n[00:02.00]drift");
+        let line = &lyrics.lines[0];
+        let mut widths = Vec::new();
+        for position in [1.25, 1.5, 1.75] {
+            let result = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let layout = crate::lyric_fonts::layout(
+                        ctx,
+                        &line.text,
+                        FontId::proportional(32.),
+                        450.,
+                    );
+                    let syllables = WordLayout::new(0, line, &layout);
+                    assert_eq!(syllables.fragments.len(), 2);
+                    assert_eq!(
+                        syllables.fragments[0].rect.right(),
+                        syllables.fragments[1].rect.left()
+                    );
+                    syllables.paint(
+                        ui,
+                        &layout,
+                        line,
+                        position,
+                        true,
+                        Colors {
+                            resting: GREY,
+                            fill: TEXT,
+                            glow: None,
+                        },
+                    );
+                });
+            });
+            widths.push(result.shapes.iter().rev().find(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == "Embers")
+            }).unwrap().clip_rect.width());
+        }
+        assert!(widths.windows(2).all(|pair| pair[0] < pair[1]));
+    }
 
     #[test]
     fn consecutive_sung_words_share_one_halo_without_moving_their_hit_targets() {

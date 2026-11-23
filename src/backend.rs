@@ -829,38 +829,15 @@ impl Tidal {
             .get("artist")
             .or_else(|| v.pointer("/artists/0"))
             .unwrap_or(&Value::Null);
-        let mut picture = artist["picture"].as_str().unwrap_or("").to_owned();
-        if picture.is_empty()
+        let mut album = Album::from_v1(&v);
+        album.id = id;
+        if album.artist_picture.is_empty()
             && let Some(aid) = artist["id"].as_u64()
             && let Ok(a) = self.get(&format!("artists/{aid}"), &[])
         {
-            picture = a["picture"].as_str().unwrap_or("").into();
+            album.artist_picture = a["picture"].as_str().unwrap_or("").into();
         }
-        Ok(Album {
-            id,
-            title: v["title"].as_str().unwrap_or("").into(),
-            artist: artist["name"].as_str().unwrap_or("").into(),
-            artist_picture: picture,
-            cover: v["cover"].as_str().unwrap_or("").into(),
-            year: v["releaseDate"]
-                .as_str()
-                .unwrap_or("")
-                .chars()
-                .take(4)
-                .collect(),
-            quality: if v
-                .pointer("/mediaMetadata/tags")
-                .and_then(Value::as_array)
-                .is_some_and(|t| t.iter().any(|t| t == "HIRES_LOSSLESS"))
-            {
-                "HI_RES_LOSSLESS".into()
-            } else {
-                v["audioQuality"].as_str().unwrap_or("").into()
-            },
-            copyright: v["copyright"].as_str().unwrap_or("").into(),
-            explicit: v["explicit"].as_bool().unwrap_or(false),
-            release_type: v["type"].as_str().unwrap_or("").into(),
-        })
+        Ok(album)
     }
 
     pub fn save_album(&mut self, id: u64) -> Result<()> {
@@ -879,21 +856,24 @@ impl Tidal {
         )?)?;
         Ok(())
     }
-    pub fn collection_state(&mut self) -> Result<Vec<String>> {
+    pub fn collection_state(&mut self) -> Result<Vec<Album>> {
         ensure!(
             self.session.compatibility,
-            "Collection requires the lossless web connection"
+            "Saved albums require the lossless web connection"
         );
         let uid = self.session.user_id;
+        let mut seen = HashSet::new();
         Ok(self
             .v1_pages(&format!("users/{uid}/favorites/albums"), &[])?
             .iter()
-            .filter_map(|v| {
-                v.pointer("/item/id")
-                    .or_else(|| v.get("id"))
-                    .and_then(Value::as_u64)
+            .map(|v| {
+                Album::from_v1(
+                    v.get("item")
+                        .filter(|item| item.get("id").is_some())
+                        .unwrap_or(v),
+                )
             })
-            .map(|id| format!("album:{id}"))
+            .filter(|album| album.id > 0 && seen.insert(album.id))
             .collect())
     }
     pub fn collection_set(&mut self, key: &str, save: bool) -> Result<()> {
@@ -1881,7 +1861,7 @@ mod tests {
                         assert!(header.starts_with("GET /users/1/favorites/albums?"));
                         (
                             "200 OK",
-                            r#"{"items":[{"item":{"id":99}}],"totalNumberOfItems":1}"#,
+                            r#"{"items":[{"item":{"id":99,"title":"Saved album","cover":"example-cover","artist":{"name":"Example artist"}}}],"totalNumberOfItems":1}"#,
                             "",
                         )
                     }
@@ -1938,7 +1918,12 @@ mod tests {
         };
         let mut tidal = Tidal::new(session, Settings::default()).unwrap();
         tidal.test_base = Some(base);
-        assert_eq!(tidal.collection_state().unwrap(), vec!["album:99"]);
+        let albums = tidal.collection_state().unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].id, 99);
+        assert_eq!(albums[0].title, "Saved album");
+        assert_eq!(albums[0].artist, "Example artist");
+        assert_eq!(albums[0].cover, "example-cover");
         tidal.collection_set("album:99", true).unwrap();
         tidal.collection_set("album:99", false).unwrap();
         tidal.etags.insert("pl1".into(), "old".into());

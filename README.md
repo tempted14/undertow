@@ -2,9 +2,11 @@
 
 A native, lightweight TIDAL music player for Windows, built with Rust and egui. The interface and audio do not run in a browser engine. Undertow is an independent client, not an official TIDAL application.
 
+**AI-assisted development.** AI tools helped write and revise parts of Undertow’s code and documentation.
+
 ## Get started
 
-Download the Windows x64 archive from this private repository's Releases, extract it, and open Undertow.exe. Choose **Connect TIDAL** and approve sign-in on TIDAL's website. Lossless web sign-in is available in Settings → Account. A subscription and the corresponding server-side playback entitlement are required.
+Download the Windows x64 archive from [Releases](https://github.com/tempted14/undertow/releases/latest), extract it, and open Undertow.exe. Choose **Connect TIDAL** and approve sign-in on TIDAL's website. Lossless web sign-in is available in Settings → Account. A subscription and the corresponding server-side playback entitlement are required.
 
 Sessions are encrypted for the signed-in Windows user with DPAPI. Do not share sign-in return addresses, sessions, settings exports, or account captures.
 
@@ -12,7 +14,7 @@ Sessions are encrypted for the signed-in Windows user with DPAPI. Do not share s
 
 - Personalized Music discovery, saved tracks, playlists, native album/artist browsing, live search previews, sorting and filtering.
 - Native streaming playback, seeking, queue/history, shuffle/repeat, metadata/quality information and authorized downloads.
-- Synchronized and word-timed lyrics, manual scrolling/resync, cover themes, configurable glow, Unicode font fallback and floating lyrics.
+- Synchronized lyrics with word and syllable highlighting when timing is available, manual scrolling/resync, cover themes, configurable glow, Unicode font fallback and floating lyrics.
 - Editable playlists, local cover customization, profile customization, responsive layouts and keyboard shortcuts.
 - Minimal Discord listening activity and all existing native plugin controls.
 

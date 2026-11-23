@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 — 2026-11-22
+
+- Collection opens beside the sidebar with Mixes & Radio, Playlists, Albums, Tracks, and Save for Later. Playlists and saved albums have browsable artwork grids.
+- Make sidebar and page transitions quicker, with mouse and keyboard navigation for the Collection flyout.
+- Restore highlighting for genuinely timed syllables. Show line-timed lyrics first and replace them when the optional Radiant Lyrics provider supplies finer timing.
+- Disclose AI-assisted development in the README.
+
 ## 0.3.2 — 2026-11-20
 
 - Keep wrapped lyrics in the same position as karaoke highlighting advances. Start following a tapped lyric while the audio seek is still being processed, and let a new seek interrupt the scroll.

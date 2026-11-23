@@ -2,6 +2,7 @@
 use super::*;
 mod artist;
 mod catalog;
+pub(super) mod collection;
 mod controls;
 pub(super) mod discovery;
 mod favorites;
@@ -151,6 +152,32 @@ fn paint_icon(p: &egui::Painter, rect: Rect, name: &str, color: Color32) {
             p.circle_stroke(point(-0.75, 0.65), s * 0.28, stroke);
             p.circle_stroke(point(0.55, 0.4), s * 0.28, stroke);
         }
+        "list-music" => {
+            path(&[(-0.4, 0.55), (-0.4, -0.85), (0.06, -0.93)]);
+            p.circle_stroke(point(-0.65, 0.68), s * 0.25, stroke);
+            for y in [-0.46, -0.04, 0.38] {
+                line((0.22, y), (0.95, y));
+            }
+        }
+        "radio" => {
+            p.circle_filled(c, s * 0.18, color);
+            for sign in [-1., 1.] {
+                path(&[(sign * 0.44, -0.42), (sign * 0.56, 0.), (sign * 0.44, 0.42)]);
+                path(&[(sign * 0.83, -0.7), (sign * 1.03, 0.), (sign * 0.83, 0.7)]);
+            }
+        }
+        "album" => {
+            p.circle_stroke(c, s * 0.9, stroke);
+            p.circle_stroke(c, s * 0.28, stroke);
+        }
+        "bookmark" => path(&[
+            (-0.62, 0.9),
+            (-0.62, -0.9),
+            (0.62, -0.9),
+            (0.62, 0.9),
+            (0., 0.4),
+            (-0.62, 0.9),
+        ]),
         "globe" => {
             p.circle_stroke(c, s, stroke);
             line((-1., 0.), (1., 0.));
@@ -487,6 +514,7 @@ impl App {
             Page::Home
                 | Page::Discovery(_)
                 | Page::Mix(_)
+                | Page::Collection(_)
                 | Page::Album(..)
                 | Page::Artist(_)
                 | Page::Search

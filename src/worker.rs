@@ -76,7 +76,7 @@ pub enum Event {
     Artist(u64, Result<Box<Artist>, String>),
     ArtistPreview(u64, Box<Artist>),
     Collection(String, bool),
-    CollectionState(Vec<String>),
+    CollectionState(Result<Vec<Album>, String>),
     CollectionFailed(String, String),
     Prepared(u64, Box<Track>, Box<Prepared>),
     Lyrics(u64, u64, Result<Lyrics, String>),
@@ -220,16 +220,32 @@ if strict&&!p.format.lossless&&chosen.local_path.is_empty(){p.stats.cancel.store
                     }})?;
                 },
                 Command::Lyrics(gen_id,request,track,refresh)=>{
-                    if !refresh && let Some(cached)=lyrics::cached(&track) {
-                        emit(&etx,&ctx,Event::Lyrics(gen_id,request,Ok(cached)));
+                    let radiant = settings.radiant_provider;
+                    let mut cached = if refresh { None } else { lyrics::cached(&track) };
+                    if cached.as_ref().is_some_and(|l| !l.needs_timing_upgrade(radiant)) {
+                        emit(&etx,&ctx,Event::Lyrics(gen_id,request,Ok(cached.take().unwrap())));
                         return Ok(());
                     }
-                    let from_tidal=if track.local_path.is_empty(){tidal.as_mut().and_then(|t|t.tidal_lyrics(track.id).ok())}else{None};let radiant=settings.radiant_provider;let events=etx.clone();let ctx=ctx.clone();
+                    let base = cached.or_else(|| {
+                        if track.local_path.is_empty() {
+                            tidal.as_mut()
+                                .and_then(|t| t.tidal_lyrics(track.id).ok())
+                                .and_then(lyrics::from_tidal)
+                        } else {
+                            None
+                        }
+                    });
+                    let events=etx.clone();let ctx=ctx.clone();
                     std::thread::Builder::new().name("lyrics-fetch".into()).spawn(move||{
-                        let result=if let Some((lrc,plain))=from_tidal.filter(|(a,b)|!a.is_empty()||!b.is_empty()){
-                            let mut l=if lrc.is_empty(){Lyrics{lines:plain.lines().map(|s|lyrics::Line{text:s.into(),..Default::default()}).collect(),..Default::default()}}else{lyrics::parse_lrc(&lrc)};l.source="TIDAL".into();let _=lyrics::save(&track,&l);Ok(l)
-                        }else{lyrics::fetch_fresh(&track,None,radiant)};
-                        emit(&events,&ctx,Event::Lyrics(gen_id,request,result.map_err(|e|e.to_string())));
+                        // Show a usable first result while the optional timing lookup runs.
+                        let preview = base.as_ref().filter(|l| l.needs_timing_upgrade(radiant)).map(|l| {
+                            emit(&events, &ctx, Event::Lyrics(gen_id, request, Ok(l.clone())));
+                            l.timing_quality()
+                        });
+                        let result = lyrics::fetch_with_base(&track, base, radiant);
+                        if preview.is_none() || result.as_ref().is_ok_and(|l| l.timing_quality() > preview.unwrap_or(0)) {
+                            emit(&events, &ctx, Event::Lyrics(gen_id, request, result.map_err(|e| e.to_string())));
+                        }
                     })?;
                 },
                 Command::Translate(gen_id,request,l,lang,romanize)=>{let events=etx.clone();let ctx=ctx.clone();std::thread::Builder::new().name("lyrics-translate".into()).spawn(move||emit(&events,&ctx,Event::Lyrics(gen_id,request,lyrics::translate(&l,&lang,romanize).map_err(|e|e.to_string()))))?;},

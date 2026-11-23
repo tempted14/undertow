@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, io::Read, path::Path};
+use std::{collections::HashMap, io::Read, path::Path, sync::Mutex, time::Duration};
 
 /// Exact critically damped spring: consistent motion at 30, 60, or 120 Hz.
 pub fn follow_scroll(position: &mut f32, velocity: &mut f32, target: f32, dt: f32) {
@@ -39,6 +39,15 @@ pub struct Word {
     pub start: f64,
     pub end: f64,
 }
+impl Word {
+    pub fn end_time(&self) -> f64 {
+        if self.end > self.start {
+            self.end
+        } else {
+            self.start + 0.06
+        }
+    }
+}
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Line {
     pub text: String,
@@ -53,6 +62,8 @@ pub struct Lyrics {
     pub synced: bool,
     pub source: String,
     pub instrumental: bool,
+    #[serde(default)]
+    pub(crate) radiant_checked: bool,
 }
 impl Lyrics {
     pub fn active(&self, seconds: f64) -> Option<usize> {
@@ -81,7 +92,10 @@ impl Lyrics {
         let mut next = next_line;
         if let Some(line) = active.and_then(|i| self.lines.get(i)) {
             for word in &line.words {
-                let end = word.start + (word.end - word.start).max(0.06);
+                if word.text.trim().is_empty() {
+                    continue;
+                }
+                let end = word.end_time();
                 if animate_words && seconds >= word.start && seconds < end {
                     return Some(0.);
                 }
@@ -94,7 +108,21 @@ impl Lyrics {
             .map(|n| (n - seconds).max(0.))
     }
     pub fn word_synced(&self) -> bool {
-        self.lines.iter().any(|l| !l.words.is_empty())
+        self.synced
+            && self
+                .lines
+                .iter()
+                .any(|line| line.words.iter().any(|w| !w.text.trim().is_empty()))
+    }
+    pub(crate) fn timing_quality(&self) -> u8 {
+        u8::from(self.synced) + u8::from(self.word_synced())
+    }
+    pub(crate) fn needs_timing_upgrade(&self, radiant: bool) -> bool {
+        radiant
+            && !self.radiant_checked
+            && !self.instrumental
+            && self.source != "Local LRC"
+            && !self.word_synced()
     }
 }
 
@@ -213,6 +241,7 @@ fn plain(s: &str, source: &str) -> Lyrics {
         synced: false,
         source: source.into(),
         instrumental: false,
+        radiant_checked: false,
     }
 }
 fn key(track: &Track) -> String {
@@ -232,6 +261,11 @@ pub fn cached(track: &Track) -> Option<Lyrics> {
     read_json(&cache_path(track)).ok()
 }
 pub fn save(track: &Track, l: &Lyrics) -> Result<()> {
+    static WRITES: Mutex<()> = Mutex::new(());
+    let _guard = WRITES.lock().unwrap();
+    if cached(track).is_some_and(|saved| saved.timing_quality() > l.timing_quality()) {
+        return Ok(());
+    }
     let p = cache_path(track);
     write_json(&p, l)?;
     prune_cache(p.parent().unwrap(), 16 * 1024 * 1024)?;
@@ -239,14 +273,39 @@ pub fn save(track: &Track, l: &Lyrics) -> Result<()> {
 }
 
 pub fn fetch(track: &Track, tidal: Option<&mut Tidal>, radiant: bool) -> Result<Lyrics> {
-    if let Some(l) = cached(track) {
-        return Ok(l);
+    if let Some(saved) = cached(track) {
+        return if saved.needs_timing_upgrade(radiant) {
+            fetch_with_base(track, Some(saved), radiant)
+        } else {
+            Ok(saved)
+        };
     }
     fetch_fresh(track, tidal, radiant)
 }
 
 /// Explicit refresh bypasses saved timing data; a failed refresh keeps the old cache intact.
-pub fn fetch_fresh(track: &Track, mut tidal: Option<&mut Tidal>, radiant: bool) -> Result<Lyrics> {
+pub fn fetch_fresh(track: &Track, tidal: Option<&mut Tidal>, radiant: bool) -> Result<Lyrics> {
+    let base = tidal
+        .filter(|_| track.local_path.is_empty())
+        .and_then(|t| t.tidal_lyrics(track.id).ok())
+        .and_then(from_tidal);
+    fetch_with_base(track, base, radiant)
+}
+
+pub(crate) fn from_tidal((synced, text): (String, String)) -> Option<Lyrics> {
+    let mut lyrics = parse_lrc(&synced);
+    if lyrics.lines.is_empty() {
+        lyrics = plain(&text, "TIDAL");
+    }
+    lyrics.source = "TIDAL".into();
+    (!lyrics.lines.is_empty()).then_some(lyrics)
+}
+
+pub(crate) fn fetch_with_base(
+    track: &Track,
+    mut base: Option<Lyrics>,
+    radiant: bool,
+) -> Result<Lyrics> {
     if !track.local_path.is_empty() {
         let p = Path::new(&track.local_path).with_extension("lrc");
         if p.exists() {
@@ -257,26 +316,18 @@ pub fn fetch_fresh(track: &Track, mut tidal: Option<&mut Tidal>, radiant: bool) 
             return Ok(l);
         }
     }
-    let mut base = None;
-    if let Some(t) = tidal.as_mut()
-        && let Ok((synced, text)) = t.tidal_lyrics(track.id)
+    let checked_radiant = radiant && base.as_ref().is_none_or(|l| l.needs_timing_upgrade(true));
+    if checked_radiant
+        && let Ok(candidate) = fetch_radiant(track)
+        && base
+            .as_ref()
+            .is_none_or(|current| candidate.timing_quality() > current.timing_quality())
     {
-        let mut l = if !synced.is_empty() {
-            parse_lrc(&synced)
-        } else {
-            plain(&text, "TIDAL")
-        };
-        l.source = "TIDAL".into();
-        if !l.lines.is_empty() {
-            base = Some(l);
-        }
+        base = Some(candidate);
     }
-    if radiant && let Ok(l) = fetch_radiant(track) {
-        save(track, &l)?;
-        return Ok(l);
-    }
-    if let Some(l) = base {
-        save(track, &l)?;
+    if let Some(mut l) = base {
+        l.radiant_checked |= checked_radiant;
+        let _ = save(track, &l);
         return Ok(l);
     }
     let client = crate::auth::http()?;
@@ -297,6 +348,7 @@ pub fn fetch_fresh(track: &Track, mut tidal: Option<&mut Tidal>, radiant: bool) 
     };
     l.source = "LRCLIB".into();
     l.instrumental = v["instrumental"].as_bool().unwrap_or(false);
+    l.radiant_checked = checked_radiant;
     ensure!(
         !l.lines.is_empty() || l.instrumental,
         "No lyrics available from TIDAL, Radiant or LRCLIB"
@@ -321,6 +373,7 @@ fn fetch_radiant(t: &Track) -> Result<Lyrics> {
     let v = limited_json(
         crate::auth::http()?
             .get("https://rl-api.kineticsand.net/lyrics")
+            .timeout(Duration::from_secs(5))
             .query(&[
                 ("title", &t.title),
                 ("artist", &t.artist),
@@ -329,6 +382,10 @@ fn fetch_radiant(t: &Track) -> Result<Lyrics> {
             ])
             .send()?,
     )?;
+    parse_radiant(&v)
+}
+
+fn parse_radiant(v: &Value) -> Result<Lyrics> {
     ensure!(
         v["_synthesized"].as_bool() != Some(true),
         "Synthesized lyric timings were not accepted"
@@ -346,11 +403,18 @@ fn fetch_radiant(t: &Track) -> Result<Lyrics> {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|w| Word {
-                text: w["text"].as_str().unwrap_or("").into(),
-                start: w["time"].as_f64().unwrap_or(0.0) / 1000.0,
-                end: (w["time"].as_f64().unwrap_or(0.0) + w["duration"].as_f64().unwrap_or(0.0))
-                    / 1000.0,
+            .filter_map(|w| {
+                let text = w["text"].as_str()?;
+                let time = w["time"].as_f64()?;
+                let duration = w["duration"].as_f64().unwrap_or(0.);
+                let end = time + duration;
+                (!text.trim().is_empty() && time >= 0. && duration >= 0. && end.is_finite()).then(
+                    || Word {
+                        text: text.into(),
+                        start: time / 1000.,
+                        end: end / 1000.,
+                    },
+                )
             })
             .collect();
         lines.push(Line {
@@ -362,12 +426,16 @@ fn fetch_radiant(t: &Track) -> Result<Lyrics> {
         });
     }
     lines.sort_by(|a, b| a.start.total_cmp(&b.start));
-    ensure!(!lines.is_empty(), "No Radiant lyrics found");
+    ensure!(
+        lines.iter().any(|line| !line.text.trim().is_empty()),
+        "No Radiant lyrics found"
+    );
     Ok(Lyrics {
         lines,
         synced: true,
         source: "Radiant public provider".into(),
         instrumental: false,
+        radiant_checked: true,
     })
 }
 
@@ -485,6 +553,43 @@ mod tests {
         assert_eq!(l.lines[0].text, "Hello 世界");
         assert_eq!(l.lines[0].words[0].end, 2.0);
         assert_eq!(l.lines[0].words[1].end, 4.0);
+    }
+    #[test]
+    fn radiant_keeps_short_syllables_and_ignores_invalid_cues() {
+        let mut payload = serde_json::json!({
+            "data": [{
+                "startTime": 1.0,
+                "text": "Hello again",
+                "syllabus": [
+                    {"text": "Hel", "time": 1000, "duration": 32},
+                    {"text": "lo", "time": 1080, "duration": 200},
+                    {"text": "again", "time": 1450, "duration": 300},
+                    {"text": "invalid", "duration": 100}
+                ]
+            }]
+        });
+        let lyrics = parse_radiant(&payload).unwrap();
+        assert_eq!(lyrics.lines[0].words.len(), 3);
+        assert_eq!(lyrics.lines[0].words[0].text, "Hel");
+        assert_eq!(lyrics.lines[0].words[0].end_time(), 1.032);
+        assert_eq!(lyrics.next_visual_change(1.025, true), Some(0.));
+        assert!((lyrics.next_visual_change(1.05, true).unwrap() - 0.03).abs() < 1e-9);
+        assert!(lyrics.timing_quality() > parse_lrc("[00:01.00]Hello again").timing_quality());
+        assert!(!lyrics.needs_timing_upgrade(true));
+        payload["_synthesized"] = true.into();
+        assert!(parse_radiant(&payload).is_err());
+    }
+
+    #[test]
+    fn an_old_line_only_cache_can_upgrade_when_the_provider_is_enabled() {
+        let mut lyrics: Lyrics = serde_json::from_value(serde_json::json!({
+            "lines": [{"text": "Original lyrics", "start": 1.0, "words": [], "translated": "", "romanized": ""}],
+            "synced": true, "source": "TIDAL", "instrumental": false
+        })).unwrap();
+        assert!(lyrics.needs_timing_upgrade(true));
+        assert!(!lyrics.needs_timing_upgrade(false));
+        lyrics.radiant_checked = true;
+        assert!(!lyrics.needs_timing_upgrade(true));
     }
     #[test]
     fn plain_lyrics_do_not_get_invented_timestamps() {

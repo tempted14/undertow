@@ -187,29 +187,7 @@ pub fn run(path: &Path, playlist_writes: bool) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
         report["seek_verified"] = json!(audio.position() >= 10.5);
         audio.sink.pause();
-        let tidal_lyrics = tidal.tidal_lyrics(track.id).ok();
-        let fetched = if let Some((lrc, plain)) =
-            tidal_lyrics.filter(|(a, b)| !a.is_empty() || !b.is_empty())
-        {
-            let mut l = if lrc.is_empty() {
-                lyrics::Lyrics {
-                    lines: plain
-                        .lines()
-                        .map(|s| lyrics::Line {
-                            text: s.into(),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    ..Default::default()
-                }
-            } else {
-                lyrics::parse_lrc(&lrc)
-            };
-            l.source = "TIDAL".into();
-            Ok(l)
-        } else {
-            lyrics::fetch(&track, None, true)
-        };
+        let fetched = lyrics::fetch(&track, Some(&mut tidal), true);
         match fetched {
             Ok(l) => {
                 report["lyrics"] = json!({"source":l.source,"lines":l.lines.len(),"word_synced":l.word_synced(),"synced":l.synced});

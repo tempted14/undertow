@@ -79,6 +79,26 @@ impl App {
         self.busy = false;
         self.page = match screen.as_str() {
             "home" => Page::Home,
+            "collection-menu" => {
+                self.settings.show_sidebar = true;
+                self.collection_flyout.pin();
+                Page::Home
+            }
+            "collection-playlists" => Page::Collection(reference::collection::View::Playlists),
+            "collection-albums" => {
+                self.collection_albums = Some(Ok(Arc::new(
+                    (20..31)
+                        .map(|id| Album {
+                            id,
+                            title: format!("Evening Sessions {}", id - 19),
+                            artist: "Northbound".into(),
+                            cover: cover.clone(),
+                            ..Default::default()
+                        })
+                        .collect(),
+                )));
+                Page::Collection(reference::collection::View::Albums)
+            }
             "playlist" => Page::Playlist("preview-playlist".into()),
             "album" => Page::Album(20, "Evening Sessions".into()),
             "artist" => Page::Artist(10),
