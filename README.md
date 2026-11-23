@@ -2,7 +2,7 @@
 
 A native, lightweight TIDAL music player for Windows, built with Rust and egui. The interface and audio do not run in a browser engine. Undertow is an independent client, not an official TIDAL application.
 
-**AI-assisted development.** AI tools helped write and revise parts of Undertow’s code and documentation.
+**Undertow was built entirely with AI under human direction.**
 
 ## Get started
 
