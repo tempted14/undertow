@@ -15,7 +15,7 @@ impl App {
         }
         let limit = (self.home_content_height - viewport.height()).max(0.);
         if ui.rect_contains_pointer(viewport) {
-            // egui already smooths the wheel. Preserve its fractional displacement;
+            // Keep the fractional displacement from the shared wheel motion;
             // ScrollArea rounds its content origin to whole pixels at high refresh rates.
             let delta = ui.ctx().input_mut(|i| {
                 let d = i.smooth_scroll_delta.y;
@@ -25,7 +25,6 @@ impl App {
             self.home_scroll = (self.home_scroll - delta).clamp(0., limit);
             if delta.abs() > 0.01 {
                 ui.ctx().request_repaint();
-                self.ui_motion_until = Instant::now() + Duration::from_millis(220);
             }
         }
         let origin = viewport.min - vec2(0., self.home_scroll);

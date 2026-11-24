@@ -22,6 +22,7 @@ mod design;
 mod diagnostics;
 mod lyric_jump;
 mod reference;
+mod wheel;
 
 const TEXT: Color32 = design::TEXT;
 const MUTED: Color32 = design::MUTED;
@@ -227,7 +228,7 @@ pub struct App {
     credits_requested: HashSet<u64>,
     related_tracks: HashMap<u64, Result<Arc<Vec<Track>>, String>>,
     related_requested: HashSet<u64>,
-    ui_motion_until: Instant,
+    wheel: wheel::Wheel,
     display_refresh_hz: f32,
     retained_render_bytes: [usize; 3],
     home_scroll: f32,
@@ -781,7 +782,7 @@ impl App {
             credits_requested: HashSet::new(),
             related_tracks: HashMap::new(),
             related_requested: HashSet::new(),
-            ui_motion_until: Instant::now(),
+            wheel: wheel::Wheel::default(),
             display_refresh_hz: 0.,
             retained_render_bytes: [0; 3],
             home_scroll: 0.,
@@ -1946,6 +1947,7 @@ impl App {
         self.art_requests.clear();
         self.art_visible.clear();
         if self.page != self.history_page {
+            self.wheel.clear();
             self.back_history.push(self.history_page.clone());
             if self.back_history.len() > 64 {
                 self.back_history.remove(0);
@@ -1953,6 +1955,7 @@ impl App {
             self.forward_history.clear();
             self.history_page = self.page.clone();
         }
+        let scrolling = self.wheel.apply(ctx);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::B)) {
             if !self.settings.show_sidebar {
                 self.settings.show_sidebar = true;
@@ -2309,31 +2312,24 @@ impl App {
             self.save_report();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if ctx.input(|i| {
-            i.raw_scroll_delta.length_sq() > 0. || i.smooth_scroll_delta.length_sq() > 0.1
-        }) {
-            self.ui_motion_until = Instant::now() + Duration::from_millis(220);
-        }
-        let scrolling = Instant::now() < self.ui_motion_until;
         let animating = self.lyric_frame_motion
             || (self.page == Page::Lyrics
                 && self.tab_started.elapsed() < Duration::from_millis(240))
-            || scrolling
             || transition < 1.;
         if recording {
             self.metrics.frame(
-                animating && self.settings.animated_lyrics,
+                scrolling || (animating && self.settings.animated_lyrics),
                 ctx.cumulative_frame_nr(),
             );
         }
-        if animating
-            && self.settings.animated_lyrics
-            && (self.settings.display_sync || crate::software_mode())
-        {
+        // A native scroll area can consume the wheel after laying out its
+        // content. Present its updated offset even when the wheel has stopped.
+        let motion = scrolling || (animating && self.settings.animated_lyrics);
+        if motion && (self.settings.display_sync || crate::software_mode()) {
             ctx.request_repaint();
             return;
         }
-        ctx.request_repaint_after(if animating && self.settings.animated_lyrics {
+        ctx.request_repaint_after(if motion {
             Duration::from_secs_f64(1.0 / self.settings.fps.clamp(30, 240) as f64)
         } else if self.audio.is_some() && !self.paused() {
             let next = self.lyrics.next_line_change(self.lyric_position());

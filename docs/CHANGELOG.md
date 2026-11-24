@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8 — 2026-11-24
+
+- Respond sooner to mouse-wheel input across Home, albums, artists, track lists, and other scrollable views.
+- Cancel leftover wheel motion on direction changes and keep pixel-based trackpad movement direct.
+- Pace scrolling to the display or selected frame limit and stop the extra redraws after movement settles.
+
 ## 0.3.7 — 2026-11-24
 
 - Use the lightweight native window renderer by default on Windows. It composites into the retained Windows buffer and avoids a separate full-window canvas. OpenGL with VSync remains available through `--gpu`.

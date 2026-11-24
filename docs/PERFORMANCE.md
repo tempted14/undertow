@@ -1,5 +1,19 @@
 # Performance evidence
 
+## 0.3.8 scrolling
+
+A standard 40-point wheel tick applies 16 points on its first input frame and reaches the full distance as it settles. The wheel cancels leftover motion when the direction changes. Pixel-based input is passed through directly. Tests cover the final distance from 30 to 240 Hz and pass a wheel tick through a scroll area at 120 Hz.
+
+The release executable ran a seven-second muted playback fixture at 1600×1000 with a 120 FPS cap on an isolated Windows desktop. The test sent 32 wheel steps with a direction change to each view and measured frame intervals during active scrolling.
+
+| View | Average frames per second | 95th-percentile frame interval |
+|---|---:|---:|
+| Home | 115.8 | 8.86 ms |
+| Album | 110.0 | 13.01 ms |
+| Tracks | 115.6 | 8.89 ms |
+
+All three runs reported zero steady-playback underrun samples. These figures reflect the test machine and generated fixtures.
+
 ## 0.3.7 Windows renderer and lyric seeking
 
 Windows redraws changed tiles directly into its retained presentation buffer. At 1600×1000 this eliminates a separate 6.4 MB canvas. The pixel regression tests cover reuse, animation, clipping, removal, and backbuffer replacement on resize. An artwork and backdrop crop also matched byte for byte against the previous software renderer.

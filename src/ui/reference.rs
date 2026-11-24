@@ -1488,7 +1488,6 @@ impl App {
             ) {
                 self.lyric_manual_scroll = true;
                 self.lyric_jump = None;
-                self.ui_motion_until = Instant::now() + Duration::from_millis(220);
             }
             if data.synced && !self.lyric_manual_scroll {
                 let offsets = &self.lyric_offsets;
