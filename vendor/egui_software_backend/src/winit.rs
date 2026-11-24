@@ -832,16 +832,22 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                     height.get() as usize,
                 );
 
-                self.renderer.render_to_canvas(
-                    width.get() as usize,
-                    height.get() as usize,
-                    &clipped_primitives,
-                    &full_output.textures_delta,
-                    full_output.pixels_per_point,
-                );
-                if retained {
-                    self.renderer.copy_dirty_canvas_to_buffer(buffer_ref);
+                if cfg!(windows) {
+                    self.renderer.render_to_retained_buffer(
+                        buffer_ref,
+                        retained,
+                        &clipped_primitives,
+                        &full_output.textures_delta,
+                        full_output.pixels_per_point,
+                    );
                 } else {
+                    self.renderer.render_to_canvas(
+                        width.get() as usize,
+                        height.get() as usize,
+                        &clipped_primitives,
+                        &full_output.textures_delta,
+                        full_output.pixels_per_point,
+                    );
                     self.renderer.copy_canvas_to_buffer(buffer_ref);
                 }
                 self.software_backend.retained_render_bytes = self.renderer.retained_bytes();

@@ -924,7 +924,7 @@ impl App {
             self.lyric_jump = self
                 .settings
                 .animated_lyrics
-                .then(|| lyric_jump::Jump::new(self.lyric_scroll, seconds));
+                .then(|| lyric_jump::Jump::new(self.lyric_scroll, self.lyric_velocity, seconds));
             self.lyric_frame_motion = self.lyric_jump.is_some();
             self.lyric_manual_scroll = false;
             self.lyric_velocity = 0.;

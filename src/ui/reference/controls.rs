@@ -107,6 +107,81 @@ fn hover_volume_open(
     pinned || now < *deadline
 }
 
+fn vertical_volume(ui: &mut egui::Ui, volume: &mut f32, muted: &mut bool) -> bool {
+    let (bubble, _) = ui.allocate_exact_size(vec2(42., 138.), Sense::hover());
+    let body = Rect::from_min_size(bubble.min, vec2(42., 130.));
+    let response = ui
+        .interact(body, ui.id().with("volume-level"), Sense::click_and_drag())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let rail = Rect::from_center_size(body.center(), vec2(4., 98.));
+    let before = (*volume, *muted);
+    let primary = egui::PointerButton::Primary;
+    if (response.clicked_by(primary) || response.dragged_by(primary))
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        response.request_focus();
+        *volume = ((rail.bottom() - pointer.y) / rail.height()).clamp(0., 1.);
+        *muted = false;
+    }
+    if response.secondary_clicked() {
+        *muted = !*muted;
+    }
+    if response.has_focus() {
+        let (delta, toggle) = ui.input_mut(|input| {
+            let key =
+                |input: &mut egui::InputState, key| input.consume_key(egui::Modifiers::NONE, key);
+            let delta = if key(input, egui::Key::ArrowDown) || key(input, egui::Key::ArrowLeft) {
+                -0.02
+            } else if key(input, egui::Key::ArrowUp) || key(input, egui::Key::ArrowRight) {
+                0.02
+            } else {
+                0.
+            };
+            (delta, key(input, egui::Key::M))
+        });
+        if delta != 0. {
+            *volume = (*volume + delta).clamp(0., 1.);
+            *muted = false;
+        }
+        if toggle {
+            *muted = !*muted;
+        }
+    }
+
+    let level = if *muted { 0. } else { *volume };
+    response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(level), "Volume"));
+    let background = Color32::from_rgb(35, 36, 39);
+    ui.painter().rect_filled(body, 12, background);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![
+            body.center_bottom() + vec2(-12., -2.),
+            body.center_bottom() + vec2(12., -2.),
+            bubble.center_bottom() + vec2(2., 0.),
+            bubble.center_bottom() + vec2(-2., 0.),
+        ],
+        background,
+        Stroke::NONE,
+    ));
+    let thumb = pos2(rail.center().x, rail.bottom() - rail.height() * level);
+    ui.painter().rect_filled(rail, 2, Color32::from_gray(60));
+    ui.painter().rect_filled(
+        Rect::from_min_max(pos2(rail.left(), thumb.y), rail.right_bottom()),
+        2,
+        Color32::WHITE,
+    );
+    ui.painter().rect_filled(
+        Rect::from_center_size(thumb, vec2(16., 5.)),
+        2,
+        Color32::WHITE,
+    );
+    response.on_hover_text(format!(
+        "{:.0}% · Right-click to {}",
+        level * 100.,
+        if *muted { "unmute" } else { "mute" }
+    ));
+    before != (*volume, *muted)
+}
+
 #[derive(Debug, PartialEq)]
 enum LyricsAction {
     Tab(usize),
@@ -360,7 +435,9 @@ impl App {
             } else {
                 name
             };
-            let scale = if response.is_pointer_button_down_on() {
+            let scale = if *name == "toggle" {
+                1.
+            } else if response.is_pointer_button_down_on() {
                 0.94
             } else {
                 1. + hover * 0.04
@@ -454,8 +531,9 @@ impl App {
         self.tab_started = Instant::now();
         let was_manual = std::mem::take(&mut self.lyric_manual_scroll);
         self.lyric_entry_generation = self.generation;
-        self.lyric_jump = (self.settings.animated_lyrics && self.lyrics.synced)
-            .then(|| crate::ui::lyric_jump::Jump::new(self.lyric_scroll, self.lyric_position()));
+        self.lyric_jump = (self.settings.animated_lyrics && self.lyrics.synced).then(|| {
+            crate::ui::lyric_jump::Jump::new(self.lyric_scroll, 0., self.lyric_position())
+        });
         self.lyric_last_position = None;
         self.lyric_velocity = 0.;
         if !was_manual {
@@ -493,115 +571,16 @@ impl App {
             self.muted = !self.muted;
             self.apply_output_volume();
         }
-        let frame = Frame::new()
-            .fill(Color32::from_rgb(23, 25, 29))
-            .corner_radius(18)
-            .stroke(Stroke::new(1_f32, Color32::from_white_alpha(24)))
-            .inner_margin(18);
         let popup = egui::Popup::from_response(button)
             .open_bool(&mut open)
             .align(egui::emath::RectAlign::TOP)
             .gap(8.)
-            .frame(frame)
-            .width(232.)
+            .frame(Frame::NONE)
+            .width(42.)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
-                ui.set_width(232.);
-                ui.spacing_mut().item_spacing.y = 10.;
-                let (head, _) = ui.allocate_exact_size(vec2(232., 30.), Sense::hover());
-                let mute = Rect::from_center_size(
-                    pos2(head.left() + 15., head.center().y),
-                    vec2(30., 30.),
-                );
-                paint_icon(
-                    ui.painter(),
-                    mute.shrink(4.),
-                    "volume",
-                    if self.muted { GREY } else { TEXT },
-                );
-                if self.muted {
-                    ui.painter().line_segment(
-                        [
-                            mute.left_top() + vec2(4., 4.),
-                            mute.right_bottom() - vec2(4., 4.),
-                        ],
-                        Stroke::new(1.5_f32, TEXT),
-                    );
-                }
-                if ui
-                    .interact(mute, Id::new("volume-popup-mute"), Sense::click())
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(if self.muted { "Unmute" } else { "Mute" })
-                    .clicked()
-                {
-                    self.muted = !self.muted;
+                if vertical_volume(ui, &mut self.settings.volume, &mut self.muted) {
                     self.apply_output_volume();
-                }
-                ui.painter().text(
-                    pos2(head.left() + 42., head.center().y),
-                    Align2::LEFT_CENTER,
-                    "Volume",
-                    font(16., true),
-                    TEXT,
-                );
-                ui.painter().text(
-                    head.right_center(),
-                    Align2::RIGHT_CENTER,
-                    format!(
-                        "{:.0}%",
-                        if self.muted {
-                            0.
-                        } else {
-                            self.settings.volume * 100.
-                        }
-                    ),
-                    font(14., true),
-                    GREY,
-                );
-                let (track, response) =
-                    ui.allocate_exact_size(vec2(232., 32.), Sense::click_and_drag());
-                let rail = Rect::from_center_size(track.center(), vec2(216., 5.));
-                let old = self.settings.volume;
-                if response.clicked() || response.dragged() {
-                    response.request_focus();
-                    if let Some(pointer) = response.interact_pointer_pos() {
-                        self.settings.volume =
-                            ((pointer.x - rail.left()) / rail.width()).clamp(0., 1.);
-                        self.muted = false;
-                    }
-                }
-                if response.has_focus() {
-                    let delta = ui.input_mut(|i| {
-                        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
-                            -0.02
-                        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
-                            0.02
-                        } else {
-                            0.
-                        }
-                    });
-                    if delta != 0. {
-                        self.settings.volume = (self.settings.volume + delta).clamp(0., 1.);
-                        self.muted = false;
-                    }
-                }
-                let value = if self.muted { 0. } else { self.settings.volume };
-                ui.painter().rect_filled(rail, 3, Color32::from_gray(60));
-                ui.painter().rect_filled(
-                    Rect::from_min_max(
-                        rail.min,
-                        pos2(rail.left() + rail.width() * value, rail.bottom()),
-                    ),
-                    3,
-                    ACCENT,
-                );
-                let thumb = pos2(rail.left() + rail.width() * value, rail.center().y);
-                ui.painter()
-                    .circle_filled(thumb, if response.dragged() { 8. } else { 6.5 }, TEXT);
-                if (self.settings.volume - old).abs() > f32::EPSILON {
-                    self.apply_output_volume();
-                }
-                if response.drag_stopped() || response.clicked() {
                     self.schedule_settings_save();
                 }
             });
@@ -669,6 +648,51 @@ mod tests {
         );
         assert_eq!(click(rects[3].center(), false, false), None);
         assert_eq!(click(rects[3].center(), true, true), None);
+    }
+
+    #[test]
+    fn vertical_volume_clicks_go_from_zero_at_bottom_to_one_at_top() {
+        let ctx = egui::Context::default();
+        let mut volume = 0.4;
+        let mut muted = true;
+        let mut frame = |events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(220., 220.))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(Frame::NONE)
+                        .show(ctx, |ui| vertical_volume(ui, &mut volume, &mut muted));
+                },
+            );
+            (volume, muted)
+        };
+        frame(vec![]);
+        let mut click = |y, button| {
+            let pos = pos2(21., y);
+            for pressed in [true, false] {
+                let result = frame(vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]);
+                if !pressed {
+                    return result;
+                }
+            }
+            unreachable!()
+        };
+        assert_eq!(click(12., egui::PointerButton::Primary), (1., false));
+        assert_eq!(click(120., egui::PointerButton::Primary), (0., false));
+        assert_eq!(click(60., egui::PointerButton::Secondary), (0., true));
+        assert_eq!(click(60., egui::PointerButton::Secondary), (0., false));
     }
 
     #[test]

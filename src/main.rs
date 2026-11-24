@@ -18,16 +18,20 @@ mod ui;
 mod validation;
 mod worker;
 
-/// The GPU (glow) renderer is the default: it keeps scrolling and animation on the
-/// display's refresh rate. `--software` selects the CPU rasterizer, which hidden
-/// background diagnostics also use because they have no visible surface to sync to.
+/// Windows uses the renderer that draws into the retained native window buffer.
+/// OpenGL remains available for systems where GPU rendering is preferred.
 pub(crate) fn software_mode() -> bool {
     static SOFTWARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *SOFTWARE.get_or_init(|| {
-        std::env::args().any(|a| a == "--software")
-            || (std::env::args().any(|a| a == "--background-benchmark")
-                && !std::env::args().any(|a| a == "--gpu-benchmark"))
+        let args: Vec<_> = std::env::args().collect();
+        use_software_renderer(&args, cfg!(windows))
     })
+}
+
+fn use_software_renderer(args: &[String], windows: bool) -> bool {
+    let has = |flag| args.iter().skip(1).any(|arg| arg == flag);
+    has("--software")
+        || (!has("--gpu") && !has("--gpu-benchmark") && (windows || has("--background-benchmark")))
 }
 
 #[cfg(windows)]
@@ -212,7 +216,7 @@ fn main() {
     }
     if args.iter().any(|a| a == "--help") {
         println!(
-            "Undertow — native TIDAL player\n\n--open PATH       Play a local audio file\n--software        Render on the CPU instead of the GPU\n--lyrics          Open the lyrics view\n--benchmark N     Write a measured report after N seconds and exit\n--report PATH     Benchmark JSON output\n--screenshot PATH Capture the actual application window\n--mute            Mute output (decoder and audio device remain active)\n\nUNDERTOW_DATA_DIR overrides the private data directory. No client secret is accepted or stored by this executable."
+            "Undertow — native TIDAL player\n\n--open PATH       Play a local audio file\n--software        Use the lightweight native window renderer (Windows default)\n--gpu             Use OpenGL with VSync\n--lyrics          Open the lyrics view\n--benchmark N     Write a measured report after N seconds and exit\n--report PATH     Benchmark JSON output\n--screenshot PATH Capture the actual application window\n--mute            Mute output (decoder and audio device remain active)\n\nUNDERTOW_DATA_DIR overrides the private data directory. No client secret is accepted or stored by this executable."
         );
         return;
     }
@@ -295,5 +299,27 @@ fn main() {
     ) {
         eprintln!("Undertow failed to start: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod renderer_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_and_renderer_overrides() {
+        let mode = |windows, flags: &[&str]| {
+            let args = std::iter::once("undertow")
+                .chain(flags.iter().copied())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            use_software_renderer(&args, windows)
+        };
+        assert!(mode(true, &[]));
+        assert!(!mode(false, &[]));
+        assert!(mode(false, &["--background-benchmark"]));
+        assert!(!mode(true, &["--gpu"]));
+        assert!(!mode(true, &["--background-benchmark", "--gpu-benchmark"]));
+        assert!(mode(true, &["--software", "--gpu"]));
     }
 }

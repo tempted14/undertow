@@ -98,6 +98,8 @@ fn cached_frames_handle_motion_clip_reordering_removal_and_resize() {
         TextureId::Managed(0),
     );
     let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
+    let mut direct = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
+    let mut pixels = vec![[88; 4]; 160 * 160];
     let mut clipped = blue.clone();
     clipped.clip_rect = Rect::from_min_max(pos2(50., 50.), pos2(95., 110.));
     let frames = [
@@ -126,11 +128,31 @@ fn cached_frames_handle_motion_clip_reordering_removal_and_resize() {
             fresh(160, jobs, &delta),
             "frame {i}"
         );
+        direct.render_to_retained_buffer(
+            &mut BufferMutRef::new(&mut pixels, 160, 160),
+            i != 0,
+            jobs,
+            &updates,
+            1.,
+        );
+        assert_eq!(pixels, fresh(160, jobs, &delta), "retained frame {i}");
+        assert_eq!(direct.retained_bytes()[0], 0);
     }
     assert_eq!(
         replacement(&mut renderer, 128, &frames[5], &Default::default()),
         fresh(128, &frames[5], &delta)
     );
+    pixels.resize(128 * 128, [88; 4]);
+    pixels.fill([88; 4]);
+    direct.render_to_retained_buffer(
+        &mut BufferMutRef::new(&mut pixels, 128, 128),
+        false,
+        &frames[5],
+        &Default::default(),
+        1.,
+    );
+    assert_eq!(pixels, fresh(128, &frames[5], &delta));
+    assert_eq!(direct.retained_bytes()[0], 0);
 }
 #[test]
 fn retained_surface_copies_only_changes_and_matches_a_full_copy() {

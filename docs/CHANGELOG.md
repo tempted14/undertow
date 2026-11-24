@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.7 — 2026-11-24
+
+- Use the lightweight native window renderer by default on Windows. It composites into the retained Windows buffer and avoids a separate full-window canvas. OpenGL with VSync remains available through `--gpu`.
+- Smooth lyric skips with distance-based timing, a soft landing, and continuous movement when another tap moves in the same direction.
+- Keep the play and pause icons the same size on hover. Put volume in a compact vertical popup above the speaker, with drag, arrow-key, and mute controls.
+
 ## 0.3.6 — 2026-11-24
 
 - Redraw the player’s shuffle, previous, play, pause, next, and repeat icons. Preserve the button positions, actions, and repeat-one indicator.

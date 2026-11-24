@@ -1239,11 +1239,26 @@ impl App {
                     {
                         p.circle_filled(area.center(), 20., Color32::from_gray(52));
                     }
-                    paint_icon(&p, area.shrink(6.), name, GREY);
                     let b = ui
                         .interact(area, Id::new(("player-control", name)), Sense::click())
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(tip);
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if name == "volume" {
+                        let color = if b.hovered() || self.volume_popup_rect.is_some() {
+                            TEXT
+                        } else {
+                            GREY
+                        };
+                        paint_icon(&p, area.shrink(6.), name, color);
+                        if self.muted {
+                            p.line_segment(
+                                [area.center() + vec2(-8., -8.), area.center() + vec2(8., 8.)],
+                                Stroke::new(1.5_f32, color),
+                            );
+                        }
+                    } else {
+                        paint_icon(&p, area.shrink(6.), name, GREY);
+                        b.clone().on_hover_text(tip);
+                    }
                     if name == "queue" {
                         self.queue_button_rect = Some(area);
                     }
@@ -1506,22 +1521,18 @@ impl App {
                 {
                     self.lyric_jump = Some(crate::ui::lyric_jump::Jump::new(
                         self.lyric_scroll,
+                        self.lyric_velocity,
                         position,
                     ));
                 }
                 self.lyric_last_position = Some(position);
                 if let Some(jump) = &self.lyric_jump {
-                    let (scroll, moving) = crate::ui::lyric_jump::Jump::sample(
-                        jump.from,
+                    let (scroll, velocity, moving) = jump.sample(
                         scroll_target(data.active(jump.requested)),
                         jump.started.elapsed().as_secs_f32(),
                         self.settings.motion_speed,
                     );
-                    self.lyric_velocity = if moving {
-                        (scroll - self.lyric_scroll) / elapsed.max(0.001)
-                    } else {
-                        0.
-                    };
+                    self.lyric_velocity = velocity;
                     self.lyric_scroll = scroll;
                     self.lyric_frame_motion = moving;
                     if !moving {

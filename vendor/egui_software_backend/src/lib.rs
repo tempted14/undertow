@@ -278,6 +278,50 @@ impl EguiSoftwareRender {
         textures_delta: &egui::TexturesDelta,
         pixels_per_point: f32,
     ) {
+        let reset = self.canvas.resize(width, height);
+        if reset {
+            self.canvas.clear();
+        }
+        self.prepare_frame(
+            [width, height],
+            reset,
+            paint_jobs,
+            textures_delta,
+            pixels_per_point,
+        );
+        self.update_canvas_from_cached();
+    }
+
+    /// Composite into a persistent presentation buffer. Set `retained` only
+    /// if its pixels are from the immediately preceding frame.
+    pub fn render_to_retained_buffer(
+        &mut self,
+        buffer: &mut BufferMutRef,
+        retained: bool,
+        paint_jobs: &[egui::ClippedPrimitive],
+        textures_delta: &egui::TexturesDelta,
+        pixels_per_point: f32,
+    ) {
+        let size = [buffer.width, buffer.height];
+        let reset = !retained
+            || !self.canvas.data.is_empty()
+            || self.target_size != vec2(size[0] as f32, size[1] as f32);
+        self.canvas = Canvas::default();
+        if reset {
+            buffer.data.fill([0; 4]);
+        }
+        self.prepare_frame(size, reset, paint_jobs, textures_delta, pixels_per_point);
+        self.composite_into(buffer);
+    }
+
+    fn prepare_frame(
+        &mut self,
+        [width, height]: [usize; 2],
+        reset: bool,
+        paint_jobs: &[egui::ClippedPrimitive],
+        textures_delta: &egui::TexturesDelta,
+        pixels_per_point: f32,
+    ) {
         // TODO: need to deal with user textures. Either make the fields of EguiUserTextures pub or need to come up with a replacement.
 
         #[cfg(feature = "raster_stats")]
@@ -287,10 +331,9 @@ impl EguiSoftwareRender {
         assert!(height > 0);
         assert!(pixels_per_point > 0.0);
 
-        self.redraw_everything_this_frame = self.canvas.resize(width, height);
+        self.redraw_everything_this_frame = reset;
 
         if self.redraw_everything_this_frame {
-            self.canvas.clear();
             self.cached_primitives.clear();
         }
 
@@ -307,16 +350,6 @@ impl EguiSoftwareRender {
 
         self.update_dirty_tiles();
         self.clear_unused_cached_prims();
-
-        // Removal-only frames and ordering changes also invalidate canvas tiles.
-        if self.redraw_everything_this_frame
-            || self
-                .dirty_tiles
-                .iter()
-                .any(|mask| mask & Self::DIRTY_TILE_MASK != 0)
-        {
-            self.update_canvas_from_cached();
-        }
 
         self.free_textures(textures_delta);
     }
@@ -859,16 +892,30 @@ impl EguiSoftwareRender {
     }
 
     fn update_canvas_from_cached(&mut self) {
+        let mut canvas = core::mem::take(&mut self.canvas);
+        self.composite_into(&mut BufferMutRef::new(
+            &mut canvas.data,
+            canvas.width,
+            canvas.height,
+        ));
+        self.canvas = canvas;
+    }
+
+    fn composite_into(&mut self, canvas: &mut BufferMutRef) {
+        if !self
+            .dirty_tiles
+            .iter()
+            .any(|mask| mask & Self::DIRTY_TILE_MASK != 0)
+        {
+            return;
+        }
         let simd_impl = self.simd_impl;
         #[cfg(feature = "raster_stats")]
         let start = std::time::Instant::now();
-
         let mut sorted_prim_cache = self.cached_primitives.values().collect::<Vec<_>>();
         sorted_prim_cache.sort_unstable_by_key(|prim| prim.z_order);
-
-        #[allow(unused_mut)]
-        let mut canvas =
-            BufferMutRef::new(&mut self.canvas.data, self.canvas.width, self.canvas.height);
+        let full_height = canvas.height;
+        let tiles_x = self.tiles_dim[0];
 
         #[cfg(feature = "rayon")]
         {
@@ -876,83 +923,50 @@ impl EguiSoftwareRender {
                 iter::{IndexedParallelIterator, ParallelIterator},
                 slice::ParallelSliceMut,
             };
-            // composite rows of tiles in parallel
-
-            let full_height = self.canvas.height;
-
             let width = canvas.width;
-            let px_per_row_of_tiles = width * TILE_SIZE;
-
             canvas
                 .data
-                .par_chunks_mut(px_per_row_of_tiles)
+                .par_chunks_mut(width * TILE_SIZE)
                 .enumerate()
-                .for_each(|(tile_row, tile_height_row)| {
-                    let height = tile_height_row.len() / width; // Might be less than TILE_SIZE
-                    let canvas_tile_row = &mut BufferMutRef::new(tile_height_row, width, height);
-
-                    let dirty_tile_row_start = tile_row * self.tiles_dim[0];
-                    let dirty_tile_row_end = dirty_tile_row_start + self.tiles_dim[0];
-
-                    self.dirty_tiles
-                        .iter()
-                        .enumerate()
-                        .skip(dirty_tile_row_start)
-                        .take(dirty_tile_row_end)
-                        .filter(|(_, mask)| **mask & Self::DIRTY_TILE_MASK != 0)
-                        .map(|(idx, _)| idx)
-                        .for_each(|tile_idx| {
-                            let tile_y = tile_idx / self.tiles_dim[0];
-
-                            if tile_y != tile_row {
-                                return;
-                            }
-                            let canvas_row_offset = tile_row * TILE_SIZE;
-
-                            let tile_x = tile_idx % self.tiles_dim[0];
-
+                .for_each(|(tile_y, pixels)| {
+                    let row = &mut BufferMutRef::new(pixels, width, pixels.len() / width);
+                    let dirty_row = &self.dirty_tiles[tile_y * tiles_x..(tile_y + 1) * tiles_x];
+                    for (tile_x, mask) in dirty_row.iter().enumerate() {
+                        if mask & Self::DIRTY_TILE_MASK != 0 {
                             update_canvas_tile(
                                 simd_impl,
                                 &sorted_prim_cache,
-                                canvas_tile_row,
+                                row,
                                 tile_x,
                                 tile_y,
                                 full_height,
-                                canvas_row_offset,
+                                tile_y * TILE_SIZE,
                             );
-                        });
+                        }
+                    }
                 });
         }
 
         #[cfg(not(feature = "rayon"))]
-        {
-            for tile_idx in self
-                .dirty_tiles
-                .iter()
-                .enumerate()
-                .filter(|(_, mask)| **mask & Self::DIRTY_TILE_MASK != 0)
-                .map(|(idx, _)| idx)
-            {
-                let tile_x = tile_idx % self.tiles_dim[0];
-                let tile_y = tile_idx / self.tiles_dim[0];
-                let full_height = canvas.height;
+        for (tile_idx, mask) in self.dirty_tiles.iter().enumerate() {
+            if mask & Self::DIRTY_TILE_MASK != 0 {
                 update_canvas_tile(
                     simd_impl,
                     &sorted_prim_cache,
-                    &mut canvas,
-                    tile_x,
-                    tile_y,
+                    canvas,
+                    tile_idx % tiles_x,
+                    tile_idx / tiles_x,
                     full_height,
                     0,
                 );
             }
         }
+
         #[cfg(feature = "raster_stats")]
         {
             self.stats.update_canvas_from_cached = start.elapsed().as_secs_f32();
         }
     }
-
     fn clear_unused_cached_prims(&mut self) {
         self.cached_primitives
             .retain(|_hash, prim| prim.seen_this_frame);

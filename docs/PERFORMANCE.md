@@ -1,5 +1,19 @@
 # Performance evidence
 
+## 0.3.7 Windows renderer and lyric seeking
+
+Windows redraws changed tiles directly into its retained presentation buffer. At 1600×1000 this eliminates a separate 6.4 MB canvas. The pixel regression tests cover reuse, animation, clipping, removal, and backbuffer replacement on resize. An artwork and backdrop crop also matched byte for byte against the previous software renderer.
+
+The following 10-second tests used muted local playback at 1600×1000 on an isolated Windows desktop. Each run sought to three lyric lines, scrolled manually, and used Resync. MB means decimal bytes. CPU is relative to one logical core. Frame timing samples cover periods when the UI requested animation.
+
+| Build and renderer | Peak working set MB | Peak private MB | 95th-percentile animation frame interval | CPU |
+|---|---:|---:|---:|---:|
+| 0.3.6 default (OpenGL) | 121.61 | 219.11 | 33.50 ms | 1.47% |
+| 0.3.6 software | 67.09 | 52.54 | 9.27 ms | 20.44% |
+| 0.3.7 default (software) | 68.79 | 45.13 | 7.83 ms | 18.83% |
+
+Private memory fell by 7.42 MB compared with the old software renderer and by 173.99 MB compared with the old OpenGL default. Software rendering used more CPU than OpenGL and drew about four times as many frames on the isolated desktop. These measurements exclude separate GPU memory and do not establish performance on every driver, DPI, display, or live streaming session. Use `--gpu` to select OpenGL.
+
 ## 0.3.6 software-renderer memory
 
 The software renderer packs sparse cached layers in place and retains only the pixel span that contributes to each row. The pixel regression test compares a batched mesh with individually rendered shapes, including clipped content, translucent pixels, and additive color. Both OpenGL and software release full-screen lyric textures when leaving Lyrics.
