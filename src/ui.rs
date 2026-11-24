@@ -2007,7 +2007,10 @@ impl App {
                 .into();
             }
         }
-        self.metrics.sample(frame_cpu, &[]);
+        let recording = self.record_live || self.benchmark.is_some();
+        if recording {
+            self.metrics.sample(frame_cpu, &[]);
+        }
         if self.record_live && self.last_record.elapsed() > Duration::from_secs(15) {
             self.last_record = Instant::now();
             self.save_report();
@@ -2117,6 +2120,10 @@ impl App {
         // A route changed while drawing the content starts on the next frame.
         let page = self.page.clone();
         if page != self.motion_page {
+            if self.motion_page == Page::Lyrics {
+                self.lyric_galleys.clear();
+                crate::lyric_fonts::release_fullscreen_cache(ctx);
+            }
             self.motion_page = page.clone();
             self.motion_started = Instant::now();
         }
@@ -2313,10 +2320,12 @@ impl App {
                 && self.tab_started.elapsed() < Duration::from_millis(240))
             || scrolling
             || transition < 1.;
-        self.metrics.frame(
-            animating && self.settings.animated_lyrics,
-            ctx.cumulative_frame_nr(),
-        );
+        if recording {
+            self.metrics.frame(
+                animating && self.settings.animated_lyrics,
+                ctx.cumulative_frame_nr(),
+            );
+        }
         if animating
             && self.settings.animated_lyrics
             && (self.settings.display_sync || crate::software_mode())

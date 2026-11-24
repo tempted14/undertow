@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6 — 2026-11-24
+
+- Redraw the player’s shuffle, previous, play, pause, next, and repeat icons. Preserve the button positions, actions, and repeat-one indicator.
+- Compact sparse software-rendered layers by dropping unused transparent pixels from their cached rows.
+- Release lyric glow and native text textures when leaving full-screen Lyrics. Collect performance history only during diagnostic sessions.
+
 ## 0.3.5 — 2026-11-23
 
 - Reduce work in the audio callback by giving it sole ownership of the playback and consumed-sample clocks. The timeline shows the requested seek until matching audio arrives, and then advances sample by sample.

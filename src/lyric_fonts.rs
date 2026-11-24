@@ -8,6 +8,12 @@ mod halo;
 #[cfg(windows)]
 pub(crate) mod native;
 
+pub fn release_fullscreen_cache(ctx: &egui::Context) {
+    halo::clear(ctx);
+    #[cfg(windows)]
+    native::clear_lines(ctx);
+}
+
 #[derive(Clone)]
 pub enum Layout {
     Atlas(Arc<egui::Galley>),

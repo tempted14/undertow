@@ -380,9 +380,22 @@ impl Cache {
         }
     }
 }
+fn cache_id() -> egui::Id {
+    egui::Id::new("lyric-script-fonts")
+}
+
+pub(super) fn clear_lines(ctx: &egui::Context) {
+    if let Some(cache) = ctx.data(|data| data.get_temp::<Arc<Mutex<Cache>>>(cache_id()))
+        && let Ok(mut cache) = cache.lock()
+    {
+        cache.lines.clear();
+        cache.bytes = 0;
+    }
+}
+
 fn cache(ctx: &egui::Context) -> Arc<Mutex<Cache>> {
     ctx.data_mut(|data| {
-        data.get_temp_mut_or_default::<Arc<Mutex<Cache>>>(egui::Id::new("lyric-script-fonts"))
+        data.get_temp_mut_or_default::<Arc<Mutex<Cache>>>(cache_id())
             .clone()
     })
 }

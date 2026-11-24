@@ -257,3 +257,41 @@ fn solid_background_cache_uses_no_raster_bitmap_and_matches_direct_pixels() {
         "Flat fills retained a raster bitmap"
     );
 }
+
+#[test]
+fn sparse_batched_mesh_uses_less_ram_and_keeps_its_exact_pixels() {
+    let id = TextureId::Managed(0);
+    let delta = texture(id, Color32::WHITE);
+    let size = 311;
+    let clip = Rect::from_min_size(pos2(4., 7.), vec2(299., 296.));
+    let mut mesh = Mesh::with_texture(id);
+    let mut separate = Vec::new();
+    for (x, y, color) in [
+        (3., 8., Color32::RED),
+        (
+            145.,
+            137.,
+            Color32::from_rgba_premultiplied(62, 45, 80, 100),
+        ),
+        (259., 291., Color32::from_rgba_premultiplied(79, 22, 18, 0)),
+    ] {
+        mesh.add_colored_rect(Rect::from_min_size(pos2(x, y), vec2(45., 9.)), color);
+        let mut job = rect(x, y, 45., 9., color, id);
+        job.clip_rect = clip;
+        separate.push(job);
+    }
+    let batched = egui::ClippedPrimitive {
+        clip_rect: clip,
+        primitive: egui::epaint::Primitive::Mesh(mesh),
+    };
+    let background = rect(0., 0., 160., 160., Color32::DARK_GRAY, id);
+    separate.insert(0, background.clone());
+    let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
+    let actual = replacement(&mut renderer, size, &[background, batched], &delta);
+    assert_eq!(actual, fresh(size, &separate, &delta));
+    assert!(renderer.retained_bytes()[1] < 16_000);
+    assert_eq!(
+        replacement(&mut renderer, size, &[], &Default::default()),
+        vec![[0; 4]; size * size],
+    );
+}

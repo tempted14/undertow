@@ -1,5 +1,19 @@
 # Performance evidence
 
+## 0.3.6 software-renderer memory
+
+The software renderer packs sparse cached layers in place and retains only the pixel span that contributes to each row. The pixel regression test compares a batched mesh with individually rendered shapes, including clipped content, translucent pixels, and additive color. Both OpenGL and software release full-screen lyric textures when leaving Lyrics.
+
+These 18-second, muted, 1600×1000 software-renderer runs used identical playback fixtures and settings. MB means decimal bytes. CPU is relative to one logical core.
+
+| Workload | Peak working set MB, 0.3.5 → 0.3.6 | Peak private MB | Retained raster cache MB | CPU |
+|---|---:|---:|---:|---:|
+| Tracks, 44.1 kHz | 62.91 → 59.42 | 39.76 → 35.71 | 14.17 → 10.39 | 3.04% → 2.77% |
+| Lyrics, 44.1 kHz | 64.43 → 64.14 | 48.70 → 49.07 | 23.85 → 23.46 | 5.90% → 5.99% |
+| Tracks, 192 kHz | 57.81 → 53.94 | 40.16 → 36.49 | 14.72 → 10.46 | 3.41% → 4.01% |
+
+All runs completed steady playback without underruns. The smaller Tracks raster cache accounts for most of the observed private memory reduction. These short runs sample whole-process CPU and RAM and do not measure live streaming, GPU memory, or long-session behavior.
+
 ## 0.3.5 playback and software rendering
 
 The audio callback publishes both clocks with single-writer stores. The decoder attaches the starting sample to each packet, and the timeline follows the latest seek until the first sample from that seek plays. An isolated release-mode comparison of 8,192,000 clock updates per run took **11.37 ms in 0.3.4 and 3.32 ms in 0.3.5** (median of nine alternating runs). The comparison covers clock updates only. Run the equivalent in-tree benchmark with `cargo test --release --bin undertow pcm_hot_path_benchmark -- --ignored --nocapture`.

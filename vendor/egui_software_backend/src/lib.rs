@@ -204,7 +204,7 @@ impl EguiSoftwareRender {
             self.canvas.data.capacity() * 4,
             self.cached_primitives
                 .values()
-                .map(|p| p.buffer.capacity() * 4)
+                .map(CachedPrimitive::retained_bytes)
                 .sum(),
             self.textures.values().map(|t| t.data.capacity() * 4).sum(),
         ]
@@ -829,6 +829,7 @@ impl EguiSoftwareRender {
                             );
                         }
                         prim.update_occupied_tiles(self.tiles_dim[0], self.tiles_dim[1]);
+                        prim.compact_transparent_rows();
                         CacheUpdate::New(hash, prim)
                     }
                 },
@@ -1164,29 +1165,34 @@ fn update_canvas_tile(
             });
             continue;
         }
-        let prim_buf = prim.get_buffer_ref();
-        let prim_x_min = (min_x - prim.min_x).min(prim_buf.width);
-        let prim_x_max = (max_x - prim.min_x).min(prim_buf.width);
-
-        let get_ranges = |y: usize| -> (Range<usize>, Range<usize>) {
-            let canvas_row_start = (y - canvas_row_offset).min(canvas.height) * canvas.width;
-            let canvas_start = canvas_row_start + min_x;
-            let canvas_end = canvas_row_start + max_x;
-
-            let prim_y = (y - prim.min_y).min(prim_buf.height);
-            let prim_row_start = prim_y * prim_buf.width;
-            let prim_start = prim_row_start + prim_x_min;
-            let prim_end = prim_row_start + prim_x_max;
-
-            (canvas_start..canvas_end, prim_start..prim_end)
-        };
-
         dispatch_simd_impl!(simd_impl, |simd_impl| {
-            for y in min_y..max_y {
-                let (canvas_slice, prim_slice) = get_ranges(y);
-                let src_row = &prim_buf.data[prim_slice];
-                let dst_row = &mut canvas.data[canvas_slice];
-                simd_impl.egui_blend_u8_slice(src_row, dst_row);
+            if prim.rows.is_empty() {
+                let x = min_x - prim.min_x;
+                let len = max_x - min_x;
+                for y in min_y..max_y {
+                    let start = (y - prim.min_y) * prim.width + x;
+                    let dest = (y - canvas_row_offset) * canvas.width + min_x;
+                    simd_impl.egui_blend_u8_slice(
+                        &prim.buffer[start..start + len],
+                        &mut canvas.data[dest..dest + len],
+                    );
+                }
+            } else {
+                for y in min_y..max_y {
+                    let span = prim.rows[y - prim.min_y];
+                    let start_x = prim.min_x + usize::from(span.start);
+                    let left = min_x.max(start_x);
+                    let right = max_x.min(start_x + usize::from(span.len));
+                    if left < right {
+                        let start = span.offset as usize + left - start_x;
+                        let dest = (y - canvas_row_offset) * canvas.width + left;
+                        let len = right - left;
+                        simd_impl.egui_blend_u8_slice(
+                            &prim.buffer[start..start + len],
+                            &mut canvas.data[dest..dest + len],
+                        );
+                    }
+                }
             }
         });
     }
@@ -1242,6 +1248,7 @@ impl Canvas {
 /// A region of cached rendered image data that corresponds to a ClippedPrimitive.
 pub struct CachedPrimitive {
     buffer: Vec<[u8; 4]>,
+    rows: Vec<RowSpan>,
     solid: Option<[u8; 4]>,
     min_x: usize,
     min_y: usize,
@@ -1253,17 +1260,14 @@ pub struct CachedPrimitive {
     occupied_tiles: Vec<[u16; 2]>,
 }
 
-impl CachedPrimitive {
-    fn get_buffer_ref(&self) -> BufferRef<'_> {
-        BufferRef {
-            data: &self.buffer,
-            width: self.width,
-            height: self.height,
-            width_extent: self.width - 1,
-            height_extent: self.height - 1,
-        }
-    }
+#[derive(Clone, Copy)]
+struct RowSpan {
+    offset: u32,
+    start: u16,
+    len: u16,
+}
 
+impl CachedPrimitive {
     fn new(
         min_x: usize,
         min_y: usize,
@@ -1278,6 +1282,7 @@ impl CachedPrimitive {
             } else {
                 vec![[0; 4]; width * height]
             },
+            rows: Vec::new(),
             solid,
             min_x,
             min_y,
@@ -1288,6 +1293,52 @@ impl CachedPrimitive {
             rendered_this_frame: true,
             occupied_tiles: Vec::with_capacity(64),
         }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.buffer.capacity() * 4 + self.rows.capacity() * core::mem::size_of::<RowSpan>()
+    }
+
+    fn compact_transparent_rows(&mut self) {
+        // Egui batches text and shapes into meshes that can span a large
+        // rectangle with only a few bands of visible pixels.
+        if self.occupied_tiles.is_empty() {
+            self.buffer = Vec::new();
+            return;
+        }
+        if self.buffer.len() < 16_384 {
+            return;
+        }
+        let mut spans = Vec::with_capacity(self.height);
+        let mut packed = 0;
+        for row in self.buffer.chunks_exact(self.width) {
+            // A colored pixel with zero alpha can contribute additive light.
+            let (start, len) = row
+                .iter()
+                .position(|p| *p != [0; 4])
+                .map_or((0, 0), |start| {
+                    let end = row.iter().rposition(|p| *p != [0; 4]).unwrap() + 1;
+                    (start, end - start)
+                });
+            spans.push(RowSpan {
+                start: start as u16,
+                len: len as u16,
+                offset: packed as u32,
+            });
+            packed += len;
+        }
+        if packed * 4 + spans.capacity() * core::mem::size_of::<RowSpan>() >= self.buffer.len() * 3
+        {
+            return;
+        }
+        for (y, span) in spans.iter().enumerate() {
+            let src = y * self.width + usize::from(span.start);
+            self.buffer
+                .copy_within(src..src + usize::from(span.len), span.offset as usize);
+        }
+        self.buffer.truncate(packed);
+        self.buffer.shrink_to_fit();
+        self.rows = spans;
     }
 
     fn update_occupied_tiles(&mut self, tiles_wide: usize, tiles_tall: usize) {

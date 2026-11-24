@@ -5,6 +5,14 @@ use std::collections::VecDeque;
 
 const SIGMA: f32 = 3.4;
 
+fn cache_id() -> Id {
+    Id::new("lyric-halo-cache")
+}
+
+pub(super) fn clear(ctx: &egui::Context) {
+    drop(ctx.data_mut(|data| data.remove_temp::<VecDeque<(Layout, Halo)>>(cache_id())));
+}
+
 #[derive(Clone)]
 struct Halo {
     texture: TextureHandle,
@@ -23,7 +31,7 @@ pub(super) fn paint(layout: &Layout, painter: &egui::Painter, origin: Pos2, colo
         return;
     }
     let ctx = painter.ctx();
-    let key = Id::new("lyric-halo-cache");
+    let key = cache_id();
     let mut cache = ctx.data_mut(|data| {
         data.remove_temp::<VecDeque<(Layout, Halo)>>(key)
             .unwrap_or_default()

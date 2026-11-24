@@ -1,5 +1,95 @@
 use super::*;
 
+fn paint_transport_glyph(
+    painter: &egui::Painter,
+    center: Pos2,
+    name: &str,
+    scale: f32,
+    color: Color32,
+) {
+    let point = |x, y| center + vec2(x, y) * scale;
+    let fill = |points: &[(f32, f32)]| {
+        painter.add(egui::Shape::convex_polygon(
+            points.iter().map(|&(x, y)| point(x, y)).collect(),
+            color,
+            Stroke::NONE,
+        ));
+    };
+    let bar = |left, right, half_height: f32| {
+        painter.rect_filled(
+            Rect::from_min_max(point(left, -half_height), point(right, half_height)),
+            1,
+            color,
+        );
+    };
+    let stroke = Stroke::new(1.8 * scale, color);
+    let line = |points: &[(f32, f32)]| {
+        painter.add(egui::Shape::line(
+            points.iter().map(|&(x, y)| point(x, y)).collect(),
+            stroke,
+        ));
+    };
+    let curve = |points: [(f32, f32); 4]| {
+        painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+            points.map(|(x, y)| point(x, y)),
+            false,
+            Color32::TRANSPARENT,
+            stroke,
+        ));
+    };
+    match name {
+        "play" => fill(&[
+            (-9.8, -14.4),
+            (-8.6, -14.4),
+            (10.5, -1.0),
+            (10.9, 0.0),
+            (10.5, 1.0),
+            (-8.6, 14.4),
+            (-9.8, 14.4),
+        ]),
+        "pause" => {
+            bar(-9.5, -3.5, 14.5);
+            bar(3.5, 9.5, 14.5);
+        }
+        "previous" | "next" => {
+            let sign = if name == "next" { 1.0 } else { -1.0 };
+            fill(
+                &[(-8., -8.8), (-7., -8.8), (5.4, 0.), (-7., 8.8), (-8., 8.8)]
+                    .map(|(x, y)| (x * sign, y)),
+            );
+            if sign > 0.0 {
+                bar(5., 9., 9.5);
+            } else {
+                bar(-9., -5., 9.5);
+            }
+        }
+        "shuffle" => {
+            curve([(-9., 6.), (0., 6.), (-2., -6.), (8.5, -6.)]);
+            curve([(-9., -6.), (-5.7, -6.), (-4., -5.), (-2.1, -2.8)]);
+            curve([(1.5, 2.6), (3.4, 5.), (4.9, 6.), (8.5, 6.)]);
+            line(&[(5.4, -9.4), (8.8, -6.), (5.4, -2.6)]);
+            line(&[(5.4, 2.6), (8.8, 6.), (5.4, 9.4)]);
+        }
+        "repeat" => {
+            for sign in [-1., 1.] {
+                curve([
+                    (-8.5 * sign, 1.1 * sign),
+                    (-8.5 * sign, -4.8 * sign),
+                    (-5.7 * sign, -6.3 * sign),
+                    (-1.5 * sign, -6.3 * sign),
+                ]);
+                line(&[(-1.7 * sign, -6.3 * sign), (7.2 * sign, -6.3 * sign)]);
+                line(&[
+                    (4.0 * sign, -9.5 * sign),
+                    (7.5 * sign, -6.3 * sign),
+                    (4.0 * sign, -3.1 * sign),
+                ]);
+            }
+        }
+        _ => unreachable!("transport glyph {name}"),
+    }
+}
+
 fn hover_volume_open(
     icon: Rect,
     popup: Option<Rect>,
@@ -270,27 +360,20 @@ impl App {
             } else {
                 name
             };
-            let visual = Rect::from_center_size(
-                rect.center(),
-                if *name == "toggle" {
-                    vec2(46., 46.)
-                } else {
-                    vec2(34., 34.)
-                },
-            )
-            .expand(if response.is_pointer_button_down_on() {
-                -1.5
+            let scale = if response.is_pointer_button_down_on() {
+                0.94
             } else {
-                hover * 0.6
-            });
-            paint_icon(
+                1. + hover * 0.04
+            };
+            paint_transport_glyph(
                 ui.painter(),
-                visual,
+                rect.center(),
                 glyph,
+                scale,
                 if active || matches!(*name, "toggle" | "previous" | "next") {
-                    TEXT
+                    Color32::WHITE
                 } else {
-                    GREY
+                    Color32::from_gray(155)
                 },
             );
             if *name == "repeat" && self.repeat_mode == 2 {
