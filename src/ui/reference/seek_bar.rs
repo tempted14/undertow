@@ -49,7 +49,7 @@ impl App {
         duration: f64,
     ) -> f64 {
         let seek = scrub(ui, rail, self.generation, duration, self.audio.is_some());
-        let mut position = self.audio.as_ref().map_or(0., Audio::timeline_position);
+        let mut position = self.position();
         if let Some(s) = &seek {
             if s.commit
                 && let Some(audio) = &self.audio

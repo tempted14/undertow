@@ -1377,7 +1377,7 @@ impl App {
         }
         self.preview_lyric_navigation(ui.ctx());
         let data = self.lyrics.clone();
-        let position = self.lyric_display_position();
+        let position = self.lyric_position();
         // The audio seek interface rounds to milliseconds. Keep an exact tapped
         // timestamp on its line during that rounding window.
         let position = self.lyric_jump.as_ref().map_or(position, |jump| {

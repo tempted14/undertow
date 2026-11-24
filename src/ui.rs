@@ -918,10 +918,6 @@ impl App {
     fn lyric_position(&self) -> f64 {
         (self.position() + self.settings.lyric_offset_ms as f64 / 1000.).max(0.)
     }
-    fn lyric_display_position(&self) -> f64 {
-        let position = self.audio.as_ref().map_or(0., Audio::timeline_position);
-        (position + self.settings.lyric_offset_ms as f64 / 1000.).max(0.)
-    }
     fn seek_lyric(&mut self, seconds: f64) {
         if let Some(audio) = &self.audio {
             audio.seek((seconds - self.settings.lyric_offset_ms as f64 / 1000.).max(0.));

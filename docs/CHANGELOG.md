@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 — 2026-11-23
+
+- Reduce work in the audio callback by giving it sole ownership of the playback and consumed-sample clocks. The timeline shows the requested seek until matching audio arrives, and then advances sample by sample.
+- Copy only changed pixels from the software canvas into the retained Windows backbuffer. New buffers and resized windows still receive a full frame.
+- Cache renderer selection at launch to avoid repeatedly reading command-line arguments during rendering.
+
 ## 0.3.4 — 2026-11-22
 
 - Remove word and syllable highlighting and their timing lookups. Lyrics highlight the whole line and retain click-to-seek, manual scrolling, and Resync.

@@ -330,6 +330,44 @@ impl EguiSoftwareRender {
         buffer.data.copy_from_slice(&self.canvas.data);
     }
 
+    /// Update a surface that already contains the previous canvas. Returns the
+    /// number of pixels copied. Use a full copy for new or older buffers.
+    pub fn copy_dirty_canvas_to_buffer(&self, buffer: &mut BufferMutRef) -> usize {
+        let [tiles_x, _] = self.tiles_dim;
+        let width = self.canvas.width;
+        let height = self.canvas.height;
+        assert_eq!(buffer.width, width);
+        assert_eq!(buffer.height, height);
+        if self.redraw_everything_this_frame {
+            self.copy_canvas_to_buffer(buffer);
+            return width * height;
+        }
+
+        let mut copied = 0;
+        for (tile_y, row) in self.dirty_tiles.chunks(tiles_x).enumerate() {
+            let y = tile_y * TILE_SIZE;
+            let bottom = (y + TILE_SIZE).min(height);
+            let mut tile_x = 0;
+            while tile_x < row.len() {
+                if row[tile_x] & Self::DIRTY_TILE_MASK == 0 {
+                    tile_x += 1;
+                    continue;
+                }
+                let left = tile_x * TILE_SIZE;
+                while tile_x < row.len() && row[tile_x] & Self::DIRTY_TILE_MASK != 0 {
+                    tile_x += 1;
+                }
+                let right = (tile_x * TILE_SIZE).min(width);
+                for line in y..bottom {
+                    let pixels = self.canvas.get_range(left, right, line);
+                    buffer.data[pixels.clone()].copy_from_slice(&self.canvas.data[pixels]);
+                }
+                copied += (right - left) * (bottom - y);
+            }
+        }
+        copied
+    }
+
     /// Draw canvas alpha over given buffer.
     /// Only run after EguiSoftwareRender::render_to_canvas(), or use EguiSoftwareRender::render() to run both.
     /// Only writes tile regions that contain pixels that are not fully transparent.

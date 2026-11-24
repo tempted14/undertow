@@ -22,9 +22,12 @@ mod worker;
 /// display's refresh rate. `--software` selects the CPU rasterizer, which hidden
 /// background diagnostics also use because they have no visible surface to sync to.
 pub(crate) fn software_mode() -> bool {
-    std::env::args().any(|a| a == "--software")
-        || (std::env::args().any(|a| a == "--background-benchmark")
-            && !std::env::args().any(|a| a == "--gpu-benchmark"))
+    static SOFTWARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SOFTWARE.get_or_init(|| {
+        std::env::args().any(|a| a == "--software")
+            || (std::env::args().any(|a| a == "--background-benchmark")
+                && !std::env::args().any(|a| a == "--gpu-benchmark"))
+    })
 }
 
 #[cfg(windows)]

@@ -39,22 +39,25 @@ pub struct AudioStats {
     pub downloaded: AtomicU64,
     pub pcm_allocations: AtomicU64,
     pub decoder_waits: AtomicU64,
-    pub played_samples: AtomicU64,
-    pub consumed_samples: AtomicU64,
+    played_samples: AtomicU64,
+    consumed_samples: AtomicU64,
     pub underrun_samples: AtomicU64,
     pub seek_ms: AtomicU64,
     pub epoch: AtomicU64,
-    positioned_epoch: AtomicU64,
+    played_epoch: AtomicU64,
     // Zero means open. EOF belongs to the decoder generation that reached it.
     eof_epoch: AtomicU64,
     pub cancel: AtomicBool,
     pub error: Mutex<Option<String>>,
 }
 impl AudioStats {
-    fn pending_seek(&self) -> Option<f64> {
+    fn position(&self, samples_per_second: f64) -> f64 {
         let epoch = self.epoch.load(Ordering::Acquire);
-        (self.positioned_epoch.load(Ordering::Acquire) != epoch)
-            .then(|| self.seek_ms.load(Ordering::Relaxed) as f64 / 1000.)
+        if self.played_epoch.load(Ordering::Acquire) == epoch {
+            self.played_samples.load(Ordering::Relaxed) as f64 / samples_per_second
+        } else {
+            self.seek_ms.load(Ordering::Relaxed) as f64 / 1000.
+        }
     }
 
     /// Wake a blocked spool reader as well as setting the cancellation flag.
@@ -68,14 +71,9 @@ impl AudioStats {
             state.ready.notify_all();
         }
     }
-    fn record_sample(&self) {
-        // The seek worker also writes the playback clock, so it needs an RMW.
-        self.played_samples.fetch_add(1, Ordering::Relaxed);
-        // Only the source writes the consumed clock. Preserve per-sample
-        // visibility without a second locked read-modify-write instruction.
-        let consumed = self.consumed_samples.load(Ordering::Relaxed);
-        self.consumed_samples
-            .store(consumed.wrapping_add(1), Ordering::Relaxed);
+    fn publish_sample(&self, played: u64, consumed: u64) {
+        self.played_samples.store(played, Ordering::Relaxed);
+        self.consumed_samples.store(consumed, Ordering::Relaxed);
     }
 }
 
@@ -651,13 +649,16 @@ impl Prepared {
 struct Packet {
     samples: Vec<f32>,
     epoch: u64,
+    start_sample: u64,
 }
 struct PcmSource {
     rx: mpsc::Receiver<Packet>,
     recycle: mpsc::SyncSender<Vec<f32>>,
     decoder_thread: std::thread::Thread,
     buffer: Vec<f32>,
+    buffer_start: u64,
     pos: usize,
+    consumed: u64,
     epoch: u64,
     stats: Arc<AudioStats>,
     rate: u32,
@@ -686,6 +687,7 @@ impl Iterator for PcmSource {
                     Ok(p) if p.epoch == epoch => {
                         self.decoder_thread.unpark();
                         self.buffer = p.samples;
+                        self.buffer_start = p.start_sample;
                         self.pos = 0;
                         break;
                     }
@@ -714,7 +716,14 @@ impl Iterator for PcmSource {
         }
         let s = *self.buffer.get(self.pos)?;
         self.pos += 1;
-        self.stats.record_sample();
+        self.consumed += 1;
+        // The decoder tags packets with their seek origin, letting the source
+        // own both clocks without synchronizing each increment with the decoder.
+        self.stats
+            .publish_sample(self.buffer_start + self.pos as u64, self.consumed);
+        if self.pos == 1 {
+            self.stats.played_epoch.store(epoch, Ordering::Release);
+        }
         Some(s)
     }
 }
@@ -768,13 +777,18 @@ impl Audio {
         let mut samples = Vec::with_capacity(PCM_SAMPLES);
         p.decoder.copy_samples(&mut samples, initial);
         stats.pcm_allocations.store(1, Ordering::Relaxed);
-        let first = Packet { samples, epoch: 0 };
+        let first = Packet {
+            samples,
+            epoch: 0,
+            start_sample: 0,
+        };
         tx.try_send(first)
             .map_err(|_| anyhow::anyhow!("Cannot prime the audio queue"))?;
         let decoder = std::thread::Builder::new()
             .name("flac-decode".into())
             .spawn(move || {
                 let mut epoch = 0;
+                let mut next_sample = initial as u64;
                 let mut spare = None;
                 'decode: loop {
                     if stats2.cancel.load(Ordering::Relaxed) {
@@ -785,16 +799,12 @@ impl Audio {
                         epoch = current;
                         let ms = stats2.seek_ms.load(Ordering::Acquire);
                         if let Err(error) = p.decoder.try_seek(Duration::from_millis(ms)) {
-                            stats2.positioned_epoch.store(epoch, Ordering::Release);
                             if let Ok(mut problem) = stats2.error.lock() {
                                 *problem = Some(format!("Audio seek failed: {error}"));
                             }
                             break;
                         }
-                        stats2
-                            .played_samples
-                            .store(ms * rate as u64 * channels as u64 / 1000, Ordering::Relaxed);
-                        stats2.positioned_epoch.store(epoch, Ordering::Release);
+                        next_sample = ms * rate as u64 * channels as u64 / 1000;
                     }
                     let mut samples = spare
                         .take()
@@ -821,7 +831,12 @@ impl Audio {
                             std::thread::park();
                         }
                     }
-                    let mut packet = Packet { samples, epoch };
+                    let mut packet = Packet {
+                        samples,
+                        epoch,
+                        start_sample: next_sample,
+                    };
+                    next_sample += packet.samples.len() as u64;
                     loop {
                         match tx.try_send(packet) {
                             Ok(()) => break,
@@ -852,7 +867,9 @@ impl Audio {
             recycle: recycle_tx,
             decoder_thread: decoder_thread.clone(),
             buffer: Vec::new(),
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate,
@@ -873,14 +890,8 @@ impl Audio {
         })
     }
     pub fn position(&self) -> f64 {
-        self.stats.played_samples.load(Ordering::Relaxed) as f64
-            / (self.format.sample_rate as f64 * self.format.channels as f64).max(1.0)
-    }
-    pub fn timeline_position(&self) -> f64 {
-        if let Some(seconds) = self.stats.pending_seek() {
-            return seconds;
-        }
-        self.position()
+        self.stats
+            .position((self.format.sample_rate as f64 * self.format.channels as f64).max(1.0))
     }
     pub fn consumed_seconds(&self) -> f64 {
         self.stats.consumed_samples.load(Ordering::Relaxed) as f64
@@ -1037,13 +1048,16 @@ mod tests {
                 copies[usize::from(!old)].push(started.elapsed().as_secs_f64() * 1000.);
                 let stats = black_box(AudioStats::default());
                 let started = Instant::now();
-                for _ in 0..samples {
+                for sample in 1..=samples as u64 {
                     let stats = black_box(&stats);
                     if old {
                         stats.played_samples.fetch_add(1, Ordering::Relaxed);
-                        stats.consumed_samples.fetch_add(1, Ordering::Relaxed);
+                        let consumed = stats.consumed_samples.load(Ordering::Relaxed);
+                        stats
+                            .consumed_samples
+                            .store(consumed + 1, Ordering::Relaxed);
                     } else {
-                        stats.record_sample();
+                        stats.publish_sample(sample, sample);
                     }
                 }
                 clocks[usize::from(!old)].push(started.elapsed().as_secs_f64() * 1000.);
@@ -1057,7 +1071,7 @@ mod tests {
         for times in copies.iter_mut().chain(clocks.iter_mut()) {
             times.sort_by(f64::total_cmp);
         }
-        let report = serde_json::json!({"scope":"Seven alternating-order batches; 2000 already-decoded 4096-float stereo packet copies and 8192000 exact sample-clock updates per batch. Isolated hot paths, not total playback CPU or decode throughput.","copy_scalar_median_ms":copies[0][3],"copy_bulk_median_ms":copies[1][3],"clock_two_rmw_median_ms":clocks[0][3],"clock_single_writer_median_ms":clocks[1][3]});
+        let report = serde_json::json!({"scope":"Seven alternating-order batches; 2000 already-decoded 4096-float stereo packet copies and 8192000 exact sample-clock updates per batch. Isolated hot paths, not total playback CPU or decode throughput.","copy_scalar_median_ms":copies[0][3],"copy_bulk_median_ms":copies[1][3],"clock_previous_median_ms":clocks[0][3],"clock_single_writer_median_ms":clocks[1][3]});
         println!("{report}");
         if let Ok(path) = std::env::var("UNDERTOW_BENCH_REPORT") {
             crate::config::write_json(Path::new(&path), &report).unwrap();
@@ -1100,7 +1114,9 @@ mod tests {
             recycle,
             decoder_thread: std::thread::current(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate: 44100,
@@ -1110,11 +1126,13 @@ mod tests {
         tx.send(Packet {
             samples: vec![1., 2.],
             epoch: 0,
+            start_sample: 0,
         })
         .unwrap();
         tx.send(Packet {
             samples: vec![3., 4.],
             epoch: 0,
+            start_sample: 2,
         })
         .unwrap();
         assert_eq!(
@@ -1123,15 +1141,16 @@ mod tests {
         );
         assert_eq!(reused.try_recv().unwrap(), vec![1., 2.]);
         stats.epoch.store(1, Ordering::Release);
-        stats.played_samples.store(100, Ordering::Relaxed);
         tx.send(Packet {
             samples: vec![5., 6.],
             epoch: 0,
+            start_sample: 4,
         })
         .unwrap();
         tx.send(Packet {
             samples: vec![7., 8.],
             epoch: 1,
+            start_sample: 100,
         })
         .unwrap();
         assert_eq!(source.by_ref().take(2).collect::<Vec<_>>(), vec![7., 8.]);
@@ -1142,15 +1161,21 @@ mod tests {
     }
 
     #[test]
-    fn timeline_holds_requested_position_until_decoder_acknowledges_it() {
+    fn timeline_holds_latest_seek_until_matching_pcm_is_consumed() {
+        let rate = 88_200.;
         let stats = AudioStats::default();
-        assert_eq!(stats.pending_seek(), None);
+        assert_eq!(stats.position(rate), 0.);
+        stats.publish_sample(88_200, 88_200);
+        assert_eq!(stats.position(rate), 1.);
         stats.seek_ms.store(38_500, Ordering::Relaxed);
         stats.epoch.store(2, Ordering::Release);
-        stats.positioned_epoch.store(1, Ordering::Release);
-        assert_eq!(stats.pending_seek(), Some(38.5));
-        stats.positioned_epoch.store(2, Ordering::Release);
-        assert_eq!(stats.pending_seek(), None);
+        stats.publish_sample(500_000, 88_201);
+        stats.played_epoch.store(1, Ordering::Release);
+        assert_eq!(stats.position(rate), 38.5);
+        let played = (38.5 * rate) as u64 + 1;
+        stats.publish_sample(played, 88_202);
+        stats.played_epoch.store(2, Ordering::Release);
+        assert_eq!(stats.position(rate), played as f64 / rate);
     }
 
     #[test]
@@ -1163,7 +1188,9 @@ mod tests {
             recycle,
             decoder_thread: std::thread::current(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate: 44100,
@@ -1176,6 +1203,7 @@ mod tests {
         tx.send(Packet {
             samples: vec![0.5],
             epoch: 1,
+            start_sample: 0,
         })
         .unwrap();
         stats.eof_epoch.store(2, Ordering::Release);
@@ -1191,6 +1219,7 @@ mod tests {
             tx.send(Packet {
                 samples: vec![0.5],
                 epoch: 0,
+                start_sample: 0,
             })
             .unwrap();
             ready_tx.send(()).unwrap();
@@ -1204,7 +1233,9 @@ mod tests {
             recycle: mpsc::sync_channel(1).0,
             decoder_thread: producer.thread().clone(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate: 44100,
@@ -1402,7 +1433,9 @@ mod tests {
             recycle: mpsc::sync_channel(1).0,
             decoder_thread: std::thread::current(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate: 44100,
@@ -1421,6 +1454,7 @@ mod tests {
         tx.send(Packet {
             samples: vec![0.1, 0.2, 0.3, 0.4],
             epoch: 0,
+            start_sample: 0,
         })
         .unwrap();
         let mut source = PcmSource {
@@ -1428,7 +1462,9 @@ mod tests {
             recycle: mpsc::sync_channel(1).0,
             decoder_thread: std::thread::current(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats: stats.clone(),
             rate: 44100,
@@ -1439,19 +1475,20 @@ mod tests {
             assert!(source.next().is_some());
         }
         // A decoder seek changes the position clock but is not consumed audio.
-        stats
-            .played_samples
-            .store(44100 * 2 * 60, Ordering::Relaxed);
+        stats.seek_ms.store(60_000, Ordering::Relaxed);
         stats.epoch.store(1, Ordering::Release);
         assert_eq!(source.next(), Some(0.));
         assert_eq!(stats.consumed_samples.load(Ordering::Relaxed), 4);
+        assert_eq!(stats.position(88_200.), 60.);
         tx.send(Packet {
             samples: vec![0.5, 0.6],
             epoch: 1,
+            start_sample: 88_200 * 60,
         })
         .unwrap();
         assert_eq!(source.next(), Some(0.5));
         assert_eq!(source.next(), Some(0.6));
+        assert_eq!(stats.position(88_200.), (88_200. * 60. + 2.) / 88_200.);
         assert_eq!(stats.consumed_samples.load(Ordering::Relaxed), 6);
         assert_eq!(stats.underrun_samples.load(Ordering::Relaxed), 1);
     }
@@ -1465,7 +1502,9 @@ mod tests {
             recycle: mpsc::sync_channel(1).0,
             decoder_thread: std::thread::current(),
             buffer: vec![],
+            buffer_start: 0,
             pos: 0,
+            consumed: 0,
             epoch: 0,
             stats,
             rate: 44100,

@@ -823,6 +823,9 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                             "softbuffer::Surface::buffer_mut",
                         ))?;
 
+                // The Windows backbuffer retains the last presented pixels.
+                // Still present the full surface for OS-triggered redraws.
+                let retained = cfg!(windows) && buffer.age() == 1;
                 let buffer_ref = &mut BufferMutRef::new(
                     bytemuck::cast_slice_mut(&mut buffer),
                     width.get() as usize,
@@ -836,7 +839,11 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                     &full_output.textures_delta,
                     full_output.pixels_per_point,
                 );
-                self.renderer.copy_canvas_to_buffer(buffer_ref);
+                if retained {
+                    self.renderer.copy_dirty_canvas_to_buffer(buffer_ref);
+                } else {
+                    self.renderer.copy_canvas_to_buffer(buffer_ref);
+                }
                 self.software_backend.retained_render_bytes = self.renderer.retained_bytes();
 
                 for user_data in screenshots {

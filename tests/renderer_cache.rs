@@ -133,6 +133,50 @@ fn cached_frames_handle_motion_clip_reordering_removal_and_resize() {
     );
 }
 #[test]
+fn retained_surface_copies_only_changes_and_matches_a_full_copy() {
+    let id = TextureId::Managed(0);
+    let delta = texture(id, Color32::WHITE);
+    let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Bgra);
+    let mut size = 157;
+    let mut pixels = vec![[88; 4]; size * size];
+    let background = rect(0., 0., 157., 157., Color32::DARK_GRAY, id);
+    let first = vec![
+        background.clone(),
+        rect(120., 142., 30., 15., Color32::RED, id),
+    ];
+    let moved = vec![
+        background.clone(),
+        rect(138., 146., 19., 11., Color32::GREEN, id),
+    ];
+    let empty = egui::TexturesDelta::default();
+    for (jobs, updates, full) in [
+        (&first, &delta, true),
+        (&first, &empty, false),
+        (&moved, &empty, false),
+        (&vec![background], &empty, false),
+    ] {
+        renderer.render_to_canvas(size, size, jobs, updates, 1.);
+        let copied =
+            renderer.copy_dirty_canvas_to_buffer(&mut BufferMutRef::new(&mut pixels, size, size));
+        let mut expected = vec![[0; 4]; size * size];
+        renderer.copy_canvas_to_buffer(&mut BufferMutRef::new(&mut expected, size, size));
+        assert_eq!(pixels, expected);
+        if full {
+            assert_eq!(copied, size * size);
+        } else if std::ptr::eq(jobs, &first) {
+            assert_eq!(copied, 0);
+        } else {
+            assert!(copied > 0 && copied < size * size);
+        }
+    }
+    size = 135;
+    pixels.resize(size * size, [88; 4]);
+    renderer.render_to_canvas(size, size, &moved, &empty, 1.);
+    let copied =
+        renderer.copy_dirty_canvas_to_buffer(&mut BufferMutRef::new(&mut pixels, size, size));
+    assert_eq!(copied, size * size);
+}
+#[test]
 fn unchanged_geometry_invalidates_when_texture_pixels_change() {
     let id = TextureId::Managed(0);
     let jobs = vec![rect(0., 0., 140., 140., Color32::WHITE, id)];
